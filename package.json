@@ -1,0 +1,16 @@
+{
+  "name": "claude-custom-connectors",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "connectors/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "clean": "rm -rf packages/*/dist connectors/*/dist"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
