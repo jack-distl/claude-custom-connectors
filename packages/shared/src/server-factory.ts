@@ -20,10 +20,14 @@ export function createConnectorServer(config: ConnectorConfig): McpServer {
 
 /**
  * Starts the HTTP server with MCP streamable HTTP transport and optional OAuth proxy.
+ *
+ * In stateless mode, a fresh McpServer + transport is created per request.
+ * The `registerTools` callback is called on each new server instance.
  */
 export async function startServer(
-  server: McpServer,
-  config: ConnectorConfig
+  _server: McpServer,
+  config: ConnectorConfig,
+  registerTools?: (server: McpServer) => void
 ): Promise<void> {
   const port = config.port ?? parseInt(process.env.PORT ?? "3000", 10);
 
@@ -66,16 +70,39 @@ export async function startServer(
     );
   }
 
-  // MCP transport
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined,
-  });
-
-  await server.connect(transport);
-
-  // MCP endpoint — handle POST, GET, DELETE
+  // MCP endpoint — create a fresh server + transport per request (stateless mode)
   app.all("/mcp", async (req, res) => {
-    await transport.handleRequest(req, res);
+    try {
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+      });
+
+      const server = new McpServer({
+        name: config.name,
+        version: config.version,
+      });
+
+      if (registerTools) {
+        registerTools(server);
+      }
+
+      await server.connect(transport);
+      await transport.handleRequest(req, res);
+
+      res.on("close", () => {
+        transport.close();
+        server.close();
+      });
+    } catch (error) {
+      console.error("MCP request error:", error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: "2.0",
+          error: { code: -32603, message: "Internal server error" },
+          id: null,
+        });
+      }
+    }
   });
 
   const httpServer = app.listen(port, () => {
