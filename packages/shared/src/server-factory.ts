@@ -32,9 +32,12 @@ export async function startServer(
   // Trust reverse proxy (Railway, etc.) so X-Forwarded-For works with rate limiting
   app.set("trust proxy", 1);
 
-  // Request logging
-  app.use((req, _res, next) => {
-    console.log(`${req.method} ${req.path}`);
+  // Request/response logging
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on("finish", () => {
+      console.log(`${req.method} ${req.path} → ${res.statusCode} (${Date.now() - start}ms)`);
+    });
     next();
   });
 
