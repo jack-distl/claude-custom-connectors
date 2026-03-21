@@ -1,7 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import type { ConnectorConfig } from "./types.js";
-import http from "node:http";
+import { ConnectorOAuthProvider } from "./oauth-provider.js";
+import express from "express";
 
 /**
  * Creates a configured MCP server instance for a connector.
@@ -17,7 +19,7 @@ export function createConnectorServer(config: ConnectorConfig): McpServer {
 }
 
 /**
- * Starts the HTTP server with MCP streamable HTTP transport.
+ * Starts the HTTP server with MCP streamable HTTP transport and optional OAuth proxy.
  */
 export async function startServer(
   server: McpServer,
@@ -25,32 +27,40 @@ export async function startServer(
 ): Promise<void> {
   const port = config.port ?? parseInt(process.env.PORT ?? "3000", 10);
 
+  const app = express();
+
+  // Health check endpoint
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok", connector: config.name });
+  });
+
+  // Mount OAuth proxy if configured
+  if (config.oauth) {
+    const provider = new ConnectorOAuthProvider(config.oauth);
+    const issuerUrl = new URL(config.oauth.serverUrl);
+
+    app.use(
+      mcpAuthRouter({
+        provider,
+        issuerUrl,
+        scopesSupported: config.oauth.scopes,
+      })
+    );
+  }
+
+  // MCP transport
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
   });
 
   await server.connect(transport);
 
-  const httpServer = http.createServer(async (req, res) => {
-    // Health check endpoint
-    if (req.url === "/health" && req.method === "GET") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "ok", connector: config.name }));
-      return;
-    }
-
-    // MCP endpoint
-    if (req.url === "/mcp" && (req.method === "POST" || req.method === "GET" || req.method === "DELETE")) {
-      await transport.handleRequest(req, res);
-      return;
-    }
-
-    // 404 for everything else
-    res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "Not found" }));
+  // MCP endpoint — handle POST, GET, DELETE
+  app.all("/mcp", async (req, res) => {
+    await transport.handleRequest(req, res);
   });
 
-  httpServer.listen(port, () => {
+  const httpServer = app.listen(port, () => {
     console.log(`${config.name} connector listening on port ${port}`);
     console.log(`  Health: http://localhost:${port}/health`);
     console.log(`  MCP:    http://localhost:${port}/mcp`);

@@ -13,6 +13,7 @@ export {
 } from "./errors.js";
 export type {
   ConnectorConfig,
+  OAuthProxyConfig,
   OAuthConfig,
   OAuthTokens,
   ApiRequestOptions,
