@@ -26,16 +26,24 @@ function errorResult(error: unknown) {
   };
 }
 
+function getAccessToken(extra: { authInfo?: { token?: string } }): string {
+  const token = extra.authInfo?.token;
+  if (!token) {
+    throw new ConnectorError("No access token found. Please reconnect to authenticate.", "AUTH_REQUIRED", 401);
+  }
+  return token;
+}
+
 export function registerTools(server: McpServer) {
   server.tool(
     "get_ad_accounts",
     "List all Meta/Facebook ad accounts accessible by the authenticated user. Returns account ID, name, status, and currency.",
     {
-      access_token: z.string().describe("Meta API access token"),
       limit: z.number().optional().describe("Max results (default 25)"),
     },
-    async ({ access_token, limit }) => {
+    async ({ limit }, extra) => {
       try {
+        const access_token = getAccessToken(extra);
         const result = await getAdAccounts(access_token, limit);
         return toolResult(result.data);
       } catch (error) {
@@ -48,7 +56,6 @@ export function registerTools(server: McpServer) {
     "get_campaigns",
     "List campaigns for a Meta ad account. Can filter by status (ACTIVE, PAUSED, etc). Returns campaign name, status, objective, and budget.",
     {
-      access_token: z.string().describe("Meta API access token"),
       ad_account_id: z
         .string()
         .describe("Ad account ID (numeric, without 'act_' prefix)"),
@@ -58,8 +65,9 @@ export function registerTools(server: McpServer) {
         .describe("Filter by status: ACTIVE, PAUSED, DELETED, ARCHIVED"),
       limit: z.number().optional().describe("Max results (default 25)"),
     },
-    async ({ access_token, ad_account_id, status, limit }) => {
+    async ({ ad_account_id, status, limit }, extra) => {
       try {
+        const access_token = getAccessToken(extra);
         const result = await getCampaigns(access_token, ad_account_id, {
           status,
           limit,
@@ -75,12 +83,12 @@ export function registerTools(server: McpServer) {
     "get_ad_sets",
     "List ad sets within a Meta campaign. Returns ad set name, status, budget, and targeting info.",
     {
-      access_token: z.string().describe("Meta API access token"),
       campaign_id: z.string().describe("Campaign ID"),
       limit: z.number().optional().describe("Max results (default 25)"),
     },
-    async ({ access_token, campaign_id, limit }) => {
+    async ({ campaign_id, limit }, extra) => {
       try {
+        const access_token = getAccessToken(extra);
         const result = await getAdSets(access_token, campaign_id, limit);
         return toolResult(result.data);
       } catch (error) {
@@ -93,12 +101,12 @@ export function registerTools(server: McpServer) {
     "get_ads",
     "List ads within a Meta ad set. Returns ad name, status, and creative info.",
     {
-      access_token: z.string().describe("Meta API access token"),
       ad_set_id: z.string().describe("Ad set ID"),
       limit: z.number().optional().describe("Max results (default 25)"),
     },
-    async ({ access_token, ad_set_id, limit }) => {
+    async ({ ad_set_id, limit }, extra) => {
       try {
+        const access_token = getAccessToken(extra);
         const result = await getAds(access_token, ad_set_id, limit);
         return toolResult(result.data);
       } catch (error) {
@@ -111,7 +119,6 @@ export function registerTools(server: McpServer) {
     "get_insights",
     "Pull performance metrics (impressions, clicks, spend, CPC, CPM, CTR, reach) for a Meta ad account, campaign, ad set, or ad. Supports date ranges and breakdowns.",
     {
-      access_token: z.string().describe("Meta API access token"),
       object_id: z
         .string()
         .describe(
@@ -143,15 +150,15 @@ export function registerTools(server: McpServer) {
         .describe("Aggregation level: account, campaign, adset, ad"),
     },
     async ({
-      access_token,
       object_id,
       date_preset,
       since,
       until,
       breakdowns,
       level,
-    }) => {
+    }, extra) => {
       try {
+        const access_token = getAccessToken(extra);
         const timeRange =
           since && until ? { since, until } : undefined;
         const result = await getInsights(access_token, object_id, {
@@ -171,14 +178,14 @@ export function registerTools(server: McpServer) {
     "get_audiences",
     "List custom and lookalike audiences for a Meta ad account. Returns audience name, type, approximate size, and delivery status.",
     {
-      access_token: z.string().describe("Meta API access token"),
       ad_account_id: z
         .string()
         .describe("Ad account ID (numeric, without 'act_' prefix)"),
       limit: z.number().optional().describe("Max results (default 25)"),
     },
-    async ({ access_token, ad_account_id, limit }) => {
+    async ({ ad_account_id, limit }, extra) => {
       try {
+        const access_token = getAccessToken(extra);
         const result = await getAudiences(access_token, ad_account_id, limit);
         return toolResult(result.data);
       } catch (error) {
