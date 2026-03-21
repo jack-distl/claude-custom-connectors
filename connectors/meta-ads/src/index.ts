@@ -20,4 +20,4 @@ const config = {
 
 const server = createConnectorServer(config);
 registerTools(server);
-startServer(server, config);
+startServer(server, config, registerTools);
