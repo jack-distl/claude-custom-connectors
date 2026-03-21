@@ -147,10 +147,12 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
   async verifyAccessToken(token: string): Promise<AuthInfo> {
     // We trust the token from the upstream provider.
     // Actual validation happens when tools use it to call the API.
+    // Set expiresAt to 1 hour from now — requireBearerAuth rejects tokens without it.
     return {
       token,
       clientId: "claude",
       scopes: this.config.scopes,
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
     };
   }
 }

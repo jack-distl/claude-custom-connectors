@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { randomUUID } from "node:crypto";
 import type { ConnectorConfig } from "./types.js";
 import { ConnectorOAuthProvider } from "./oauth-provider.js";
@@ -70,6 +71,12 @@ export async function startServer(
         clientRegistrationOptions: { rateLimit: false },
       } as any)
     );
+
+    // Protect /mcp with bearer auth so req.auth is populated for tool handlers
+    app.use("/mcp", requireBearerAuth({
+      verifier: provider,
+      requiredScopes: [],
+    }));
   }
 
   // Session store: maps session ID → transport
