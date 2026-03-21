@@ -47,7 +47,13 @@ export async function startServer(
         provider,
         issuerUrl,
         scopesSupported: config.oauth.scopes,
-      })
+        // Disable SDK's built-in rate limiting — behind Railway's reverse proxy,
+        // express-rate-limit throws on X-Forwarded-For even with trust proxy set.
+        authorizationOptions: { rateLimit: false },
+        tokenOptions: { rateLimit: false },
+        revocationOptions: { rateLimit: false },
+        clientRegistrationOptions: { rateLimit: false },
+      } as any)
     );
   }
 
