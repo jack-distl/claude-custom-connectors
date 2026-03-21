@@ -25,6 +25,12 @@ export async function startServer(
 ): Promise<void> {
   const port = config.port ?? parseInt(process.env.PORT ?? "3000", 10);
 
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+  });
+
+  await server.connect(transport);
+
   const httpServer = http.createServer(async (req, res) => {
     // Health check endpoint
     if (req.url === "/health" && req.method === "GET") {
@@ -35,15 +41,6 @@ export async function startServer(
 
     // MCP endpoint
     if (req.url === "/mcp" && (req.method === "POST" || req.method === "GET" || req.method === "DELETE")) {
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
-      });
-
-      res.on("close", () => {
-        transport.close().catch(() => {});
-      });
-
-      await server.connect(transport);
       await transport.handleRequest(req, res);
       return;
     }
