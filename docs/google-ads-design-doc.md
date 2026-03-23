@@ -4,7 +4,7 @@
 
 **Product Name:** Google Ads MCP Connector
 **Version:** 1.0.0
-**Google Ads API Version:** v18 (REST)
+**Google Ads API Version:** v19 (REST)
 **Developer:** [Your Company Name]
 
 ### What It Does
@@ -24,7 +24,7 @@ Marketing teams and agency account managers who manage Google Ads campaigns. Use
 ```
 ┌──────────────────┐      ┌──────────────────────┐      ┌─────────────────────┐
 │                  │      │                      │      │                     │
-│  Claude Desktop  │─MCP──│  Google Ads MCP       │─REST─│  Google Ads API v18  │
+│  Claude Desktop  │─MCP──│  Google Ads MCP       │─REST─│  Google Ads API v19  │
 │  (User Interface)│      │  Connector (Node.js)  │      │  googleapis.com      │
 │                  │      │                      │      │                     │
 └──────────────────┘      └──────────────────────┘      └─────────────────────┘
@@ -79,7 +79,7 @@ Marketing teams and agency account managers who manage Google Ads campaigns. Use
 
 ### Endpoints Used
 
-All requests go to `https://googleads.googleapis.com/v18/`.
+All requests go to `https://googleads.googleapis.com/v19/`.
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|

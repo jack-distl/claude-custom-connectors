@@ -1,6 +1,6 @@
 import { apiRequest } from "@custom-connectors/shared";
 
-const GOOGLE_ADS_API_BASE = "https://googleads.googleapis.com/v18";
+const GOOGLE_ADS_API_BASE = "https://googleads.googleapis.com/v19";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
