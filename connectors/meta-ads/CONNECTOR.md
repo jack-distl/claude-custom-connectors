@@ -1,7 +1,7 @@
 # Meta Ads Connector
 
 ## Overview
-Connects to the Meta (Facebook) Marketing API to read ad account data, campaigns, ad sets, ads, performance insights, and audiences.
+Connects to the Meta (Facebook) Marketing API to read and manage ad account data, campaigns, ad sets, ads, performance insights, and audiences.
 
 ## Authentication
 - **Type:** OAuth2 Authorization Code
@@ -28,6 +28,15 @@ Pulls performance metrics (impressions, clicks, spend, CPC, CPM, CTR, reach) for
 
 ### `get_audiences`
 Lists custom and lookalike audiences for an ad account.
+
+### `update_campaign`
+Update a campaign's status, name, or budget. Supports: `name`, `status` (ACTIVE/PAUSED/DELETED/ARCHIVED), `daily_budget`, `lifetime_budget`, `special_ad_categories`. Budget values are in cents.
+
+### `update_ad_set`
+Update an ad set's status, name, budget, targeting, bid, or schedule. Supports: `name`, `status`, `daily_budget`, `lifetime_budget`, `bid_amount`, `billing_event`, `optimization_goal`, `targeting` (JSON), `start_time`, `end_time`. Budget and bid values are in cents.
+
+### `update_ad`
+Update an ad's status, name, or creative. Supports: `name`, `status` (ACTIVE/PAUSED/DELETED/ARCHIVED), `creative` (JSON).
 
 ## Environment Variables
 | Variable | Description |

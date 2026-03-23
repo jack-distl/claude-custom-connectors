@@ -57,6 +57,10 @@ interface PaginatedResponse<T> {
   };
 }
 
+interface MetaUpdateResponse {
+  success: boolean;
+}
+
 function authHeaders(accessToken: string) {
   return { Authorization: `Bearer ${accessToken}` };
 }
@@ -159,5 +163,63 @@ export async function getAudiences(
   return apiRequest(
     `${GRAPH_API_BASE}/act_${adAccountId}/customaudiences?fields=${fields}&limit=${limit}`,
     { headers: authHeaders(accessToken) }
+  );
+}
+
+function buildUpdateParams(fields: Record<string, unknown>): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined) {
+      params.set(
+        key,
+        typeof value === "object" ? JSON.stringify(value) : String(value)
+      );
+    }
+  }
+  return params;
+}
+
+export async function updateCampaign(
+  accessToken: string,
+  campaignId: string,
+  fields: Record<string, unknown>
+): Promise<MetaUpdateResponse> {
+  const params = buildUpdateParams(fields);
+  return apiRequest<MetaUpdateResponse>(
+    `${GRAPH_API_BASE}/${campaignId}?${params}`,
+    {
+      method: "POST",
+      headers: authHeaders(accessToken),
+    }
+  );
+}
+
+export async function updateAdSet(
+  accessToken: string,
+  adSetId: string,
+  fields: Record<string, unknown>
+): Promise<MetaUpdateResponse> {
+  const params = buildUpdateParams(fields);
+  return apiRequest<MetaUpdateResponse>(
+    `${GRAPH_API_BASE}/${adSetId}?${params}`,
+    {
+      method: "POST",
+      headers: authHeaders(accessToken),
+    }
+  );
+}
+
+export async function updateAd(
+  accessToken: string,
+  adId: string,
+  fields: Record<string, unknown>
+): Promise<MetaUpdateResponse> {
+  const params = buildUpdateParams(fields);
+  return apiRequest<MetaUpdateResponse>(
+    `${GRAPH_API_BASE}/${adId}?${params}`,
+    {
+      method: "POST",
+      headers: authHeaders(accessToken),
+    }
   );
 }
