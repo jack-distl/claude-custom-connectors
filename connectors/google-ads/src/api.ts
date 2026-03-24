@@ -1,6 +1,7 @@
 import { apiRequest } from "@custom-connectors/shared";
 
-const GOOGLE_ADS_API_BASE = "https://googleads.googleapis.com/v19";
+const GOOGLE_ADS_API_VERSION = process.env.GOOGLE_ADS_API_VERSION || "v18";
+const GOOGLE_ADS_API_BASE = `https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}`;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -60,7 +61,7 @@ export async function searchGoogleAds(
   options: { loginCustomerId?: string; pageSize?: number; pageToken?: string } = {}
 ): Promise<GoogleAdsSearchResponse> {
   return apiRequest(
-    `${GOOGLE_ADS_API_BASE}/customers/${customerId}/googleAds:searchStream`,
+    `${GOOGLE_ADS_API_BASE}/customers/${customerId}/googleAds:search`,
     {
       method: "POST",
       headers: {
