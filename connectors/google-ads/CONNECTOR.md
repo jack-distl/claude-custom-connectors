@@ -76,6 +76,7 @@ All create/update/remove operations use the Google Ads API mutate pattern:
 | `GOOGLE_CLIENT_ID` | OAuth client ID from Google Cloud Console |
 | `GOOGLE_CLIENT_SECRET` | OAuth client secret |
 | `GOOGLE_DEVELOPER_TOKEN` | Google Ads API developer token |
+| `GOOGLE_ADS_API_VERSION` | API version override (default: `v18`) |
 
 ## API Reference
 - [Google Ads API](https://developers.google.com/google-ads/api/docs/start)
