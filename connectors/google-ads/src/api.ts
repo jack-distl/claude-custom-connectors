@@ -1,6 +1,6 @@
 import { apiRequest } from "@custom-connectors/shared";
 
-const GOOGLE_ADS_API_VERSION = process.env.GOOGLE_ADS_API_VERSION || "v18";
+const GOOGLE_ADS_API_VERSION = process.env.GOOGLE_ADS_API_VERSION || "v19";
 const GOOGLE_ADS_API_BASE = `https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}`;
 
 // ── Types ───────────────────────────────────────────────────────────────────
