@@ -56,7 +56,6 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
     const scopes = (params.scopes ?? this.config.scopes).join(" ");
     url.searchParams.set("scope", scopes);
     if (params.state) url.searchParams.set("state", params.state);
-    console.log(`[OAuth] Authorize redirect_uri=${params.redirectUri} scopes=${scopes}`);
     res.redirect(url.toString());
   }
 
@@ -81,8 +80,6 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
       client_secret: this.config.clientSecret,
     });
     if (redirectUri) params.set("redirect_uri", redirectUri);
-
-    console.log(`[OAuth] Token exchange: tokenUrl=${this.config.tokenUrl} redirect_uri=${redirectUri ?? "(none)"}`);
 
     const response = await fetch(this.config.tokenUrl, {
       method: "POST",
