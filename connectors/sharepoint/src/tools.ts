@@ -216,7 +216,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "upload_file",
-    "Upload a file to a SharePoint document library. Creates a new file or overwrites an existing one with the same name. Supports any file type including Microsoft Office formats (.docx, .xlsx, .pptx), PDFs, CSVs, and plain text. Use the correct file extension and SharePoint will recognize the format.",
+    "Upload a file to a SharePoint document library. Creates a new file or overwrites an existing one with the same name. Supports any file type including Microsoft Office formats (.docx, .xlsx, .pptx), PDFs, CSVs, and plain text. For binary files (.docx, .xlsx, .pptx, .pdf, etc.), provide the file data as base64 in content_base64. For plain text files (.txt, .csv, .json, etc.), use content. Exactly one of content or content_base64 must be provided.",
     {
       drive_id: z.string().describe("The drive ID to upload to."),
       parent_folder_id: z
@@ -227,21 +227,43 @@ export function registerTools(server: McpServer) {
       file_name: z
         .string()
         .describe(
-          "The name for the file including extension (e.g., 'report.csv', 'notes.txt')."
+          "The name for the file including extension (e.g., 'report.docx', 'data.xlsx', 'notes.txt')."
         ),
       content: z
         .string()
-        .describe("The text content of the file to upload."),
+        .optional()
+        .describe("Plain text content for text-based files (.txt, .csv, .json, .xml, .html, .md)."),
+      content_base64: z
+        .string()
+        .optional()
+        .describe("Base64-encoded binary content for Office files and other binary formats (.docx, .xlsx, .pptx, .pdf, .png, .zip, etc.)."),
     },
-    async ({ drive_id, parent_folder_id, file_name, content }, extra) => {
+    async ({ drive_id, parent_folder_id, file_name, content, content_base64 }, extra) => {
       try {
+        if (!content && !content_base64) {
+          throw new ConnectorError(
+            "Either content or content_base64 must be provided.",
+            "VALIDATION_ERROR",
+            400
+          );
+        }
+        if (content && content_base64) {
+          throw new ConnectorError(
+            "Provide either content or content_base64, not both.",
+            "VALIDATION_ERROR",
+            400
+          );
+        }
         const accessToken = getAccessToken(extra);
+        const body: string | Blob = content_base64
+          ? new Blob([Buffer.from(content_base64, "base64")])
+          : content!;
         const result = await uploadFile(
           accessToken,
           drive_id,
           parent_folder_id,
           file_name,
-          content
+          body
         );
         return toolResult(result);
       } catch (error) {
