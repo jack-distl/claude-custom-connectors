@@ -196,7 +196,7 @@ export async function uploadFile(
   driveId: string,
   parentFolderId: string,
   fileName: string,
-  content: string
+  body: string | Blob
 ): Promise<DriveItem> {
   const url = `${BASE_URL}/drives/${driveId}/items/${parentFolderId}:/${encodeURIComponent(fileName)}:/content`;
   const response = await fetch(url, {
@@ -205,7 +205,7 @@ export async function uploadFile(
       ...authHeaders(accessToken),
       "Content-Type": "application/octet-stream",
     },
-    body: content,
+    body,
   });
   if (!response.ok) {
     const errorBody = await response.text();
