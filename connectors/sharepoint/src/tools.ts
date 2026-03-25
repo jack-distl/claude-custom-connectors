@@ -19,6 +19,15 @@ import {
   searchFiles,
 } from "./api.js";
 
+// ─── Distl SharePoint Defaults ────────────────────────────────────────────────
+// These IDs set the default entry point for file browsing to the Working folder
+// on the Team site. Update these if the folder structure changes.
+const DISTL_TEAM_SITE_ID =
+  "remba.sharepoint.com,71a0929e-83b9-4d4e-978c-bcef7187f459,d83790fe-adfa-434c-9140-845a8a9117d6";
+const DISTL_SHARED_DOCUMENTS_DRIVE_ID =
+  "b!npKgcbmDTk2XjLzvcYf0Wf6QN9j6rUxDkUCEWoqRF9bc9RMe9MpzRIgb-j6Z4ZJq";
+const DISTL_WORKING_FOLDER_ID = "01BAPXPPAZ2UDWMBL7TBC3C3E4G7JNQ6EW";
+
 function toolResult(data: unknown) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
@@ -118,22 +127,44 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "list_drive_items",
-    "List files and folders in a drive or specific folder. Use this to browse the contents of a document library. Returns item IDs, names, sizes, and modification dates.",
+    "List files and folders in a drive or specific folder. Defaults to the Distl Working folder on the Team site if no parameters are provided. Returns item IDs, names, sizes, and modification dates.",
     {
       drive_id: z
         .string()
-        .describe("The drive ID. Use list_drives to find this."),
+        .optional()
+        .describe("The drive ID. Defaults to the Distl Shared Documents drive if omitted."),
       folder_id: z
         .string()
         .optional()
         .describe(
-          "The folder ID to list contents of. Omit to list the root folder."
+          "The folder ID to list contents of. Defaults to the Distl Working folder if omitted."
         ),
     },
     async ({ drive_id, folder_id }, extra) => {
       try {
         const accessToken = getAccessToken(extra);
-        const result = await listDriveItems(accessToken, drive_id, folder_id);
+        const effectiveDriveId = drive_id || DISTL_SHARED_DOCUMENTS_DRIVE_ID;
+        const effectiveFolderId = folder_id || (drive_id ? undefined : DISTL_WORKING_FOLDER_ID);
+        const result = await listDriveItems(accessToken, effectiveDriveId, effectiveFolderId);
+        return toolResult(result.value);
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  server.tool(
+    "list_client_folders",
+    "List the contents of the Distl Working folder — the main folder containing client folders and active work. This is the fastest way to see what's in the Working folder. Takes no parameters.",
+    {},
+    async (_params, extra) => {
+      try {
+        const accessToken = getAccessToken(extra);
+        const result = await listDriveItems(
+          accessToken,
+          DISTL_SHARED_DOCUMENTS_DRIVE_ID,
+          DISTL_WORKING_FOLDER_ID
+        );
         return toolResult(result.value);
       } catch (error) {
         return errorResult(error);
