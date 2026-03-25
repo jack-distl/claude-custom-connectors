@@ -43,7 +43,7 @@ export async function startServer(
   app.use((req, res, next) => {
     const start = Date.now();
     res.on("finish", () => {
-      console.log(`${req.method} ${req.path} → ${res.statusCode} (${Date.now() - start}ms)`);
+      console.log(`${req.method} ${req.originalUrl} → ${res.statusCode} (${Date.now() - start}ms)`);
     });
     next();
   });
