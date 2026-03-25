@@ -216,7 +216,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "upload_file",
-    "Upload a file to a SharePoint document library. Creates a new file or overwrites an existing one with the same name. For text-based files only (txt, csv, json, etc.).",
+    "Upload a file to a SharePoint document library. Creates a new file or overwrites an existing one with the same name. Supports any file type including Microsoft Office formats (.docx, .xlsx, .pptx), PDFs, CSVs, and plain text. Use the correct file extension and SharePoint will recognize the format.",
     {
       drive_id: z.string().describe("The drive ID to upload to."),
       parent_folder_id: z
