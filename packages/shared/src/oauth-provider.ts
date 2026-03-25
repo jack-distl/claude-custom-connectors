@@ -53,11 +53,10 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
     url.searchParams.set("client_id", this.config.clientId);
     url.searchParams.set("response_type", "code");
     url.searchParams.set("redirect_uri", params.redirectUri);
-    url.searchParams.set(
-      "scope",
-      (params.scopes ?? this.config.scopes).join(" ")
-    );
+    const scopes = (params.scopes ?? this.config.scopes).join(" ");
+    url.searchParams.set("scope", scopes);
     if (params.state) url.searchParams.set("state", params.state);
+    console.log(`[OAuth] Authorize redirect_uri=${params.redirectUri} scopes=${scopes}`);
     res.redirect(url.toString());
   }
 
@@ -83,6 +82,8 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
     });
     if (redirectUri) params.set("redirect_uri", redirectUri);
 
+    console.log(`[OAuth] Token exchange: tokenUrl=${this.config.tokenUrl} redirect_uri=${redirectUri ?? "(none)"}`);
+
     const response = await fetch(this.config.tokenUrl, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -91,6 +92,7 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
 
     if (!response.ok) {
       const body = await response.text();
+      console.error(`[OAuth] Token exchange failed (${response.status}): ${body}`);
       throw new Error(`Token exchange failed (${response.status}): ${body}`);
     }
 
@@ -128,6 +130,7 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
 
     if (!response.ok) {
       const body = await response.text();
+      console.error(`[OAuth] Token refresh failed (${response.status}): ${body}`);
       throw new Error(`Token refresh failed (${response.status}): ${body}`);
     }
 
