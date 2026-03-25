@@ -33,6 +33,11 @@ This guide walks through deploying a connector using the Railway web dashboard. 
 2. Add the required variables from the connector's `.env.example` file
 3. Railway automatically sets `PORT` — you don't need to add it
 
+**All connectors need:**
+| Variable | Where to get it |
+|----------|----------------|
+| `SERVER_URL` | Set this AFTER generating a domain (Step 5) — the full Railway URL |
+
 **Meta Ads variables:**
 | Variable | Where to get it |
 |----------|----------------|
@@ -52,12 +57,14 @@ This guide walks through deploying a connector using the Railway web dashboard. 
 2. Wait for the build to complete (usually 1-2 minutes)
 3. Check the deploy logs for `"connector listening on port..."`
 
-### 5. Get the Public URL
+### 5. Get the Public URL and Set SERVER_URL
 
 1. Go to the service's **"Settings"** tab
 2. Under **"Networking"**, click **"Generate Domain"**
 3. Copy the URL (e.g., `https://meta-ads-production-xxxx.up.railway.app`)
-4. Verify it works by visiting `https://<your-url>/health` in your browser — you should see `{"status":"ok"}`
+4. **Go back to the "Variables" tab and add `SERVER_URL`** — set it to the full domain URL you just generated (e.g., `https://meta-ads-production-xxxx.up.railway.app`). **This is critical** — without it, OAuth callbacks will fail because they redirect to `localhost`.
+5. Railway will auto-redeploy with the new variable
+6. Verify it works by visiting `https://<your-url>/health` in your browser — you should see `{"status":"ok"}`
 
 ### 6. Deploy Additional Connectors
 
