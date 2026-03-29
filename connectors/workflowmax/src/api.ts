@@ -19,9 +19,9 @@ function getAccountId(accessToken: string): string {
     }
     const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
 
-    // Log both UUID candidates, use aud as account_id
+    // Log both UUID candidates, use sub as account-id (aud returned 401)
     console.log("[WFM] JWT aud:", payload.aud, "sub:", payload.sub);
-    const accountId = payload.aud;
+    const accountId = payload.sub;
     if (!accountId) {
       throw new Error(
         "No organisation ID (aud) found in token. JWT claims: " +
