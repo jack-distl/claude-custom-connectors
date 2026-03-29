@@ -50,6 +50,34 @@ function authHeaders(accessToken: string) {
 }
 
 /**
+ * Diagnostic: call /v2/me and /v2/accounts to verify token and find real account ID.
+ * Called once on first API request per token.
+ */
+async function diagnoseAuth(accessToken: string): Promise<void> {
+  const headers = { Authorization: `Bearer ${accessToken}` };
+
+  // Try /v2/me with just bearer token
+  try {
+    const meRes = await fetch(`${BASE_URL}/me`, { headers });
+    const meBody = await meRes.text();
+    console.log(`[WFM] GET /v2/me → ${meRes.status}: ${meBody}`);
+  } catch (e) {
+    console.error("[WFM] /v2/me failed:", e);
+  }
+
+  // Try /v2/accounts with just bearer token
+  try {
+    const accRes = await fetch(`${BASE_URL}/accounts`, { headers });
+    const accBody = await accRes.text();
+    console.log(`[WFM] GET /v2/accounts → ${accRes.status}: ${accBody}`);
+  } catch (e) {
+    console.error("[WFM] /v2/accounts failed:", e);
+  }
+}
+
+let diagnosed = false;
+
+/**
  * Make an API request to WorkflowMax with full error logging.
  * Unlike the shared wfmRequest, this logs the actual response body on errors
  * so we can diagnose auth issues.
@@ -59,6 +87,13 @@ async function wfmRequest<T = unknown>(
   options: { method?: string; headers?: Record<string, string>; body?: string }
 ): Promise<T> {
   const { method = "GET", headers = {}, body } = options;
+
+  // Run diagnostic on first request to log token validity and account info
+  if (!diagnosed) {
+    diagnosed = true;
+    const token = headers["Authorization"]?.replace("Bearer ", "") || "";
+    if (token) await diagnoseAuth(token);
+  }
 
   console.log(`[WFM] ${method} ${url}`);
 
