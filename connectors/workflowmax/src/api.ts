@@ -18,6 +18,10 @@ function getAccountId(accessToken: string): string {
       throw new Error("Token is not a valid JWT (expected 3 parts, got " + parts.length + ")");
     }
     const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
+
+    // Log the full JWT payload so we can identify the correct claim
+    console.log("[WFM] JWT payload claims:", JSON.stringify(payload, null, 2));
+
     // Try every plausible claim name for the organisation ID
     const accountId =
       payload.org_id ||
@@ -28,12 +32,12 @@ function getAccountId(accessToken: string): string {
       payload.tenant_id ||
       payload.wfm_org_id ||
       payload.oid ||
-      payload.tid ||
-      payload.sub;
+      payload.tid;
     if (!accountId) {
+      // Don't fall back to sub — it's the user ID, not the org ID
       throw new Error(
-        "No organisation ID found in token. JWT claims present: " +
-          Object.keys(payload).join(", ")
+        "No organisation ID found in token. JWT claims: " +
+          JSON.stringify(payload)
       );
     }
     return accountId;
