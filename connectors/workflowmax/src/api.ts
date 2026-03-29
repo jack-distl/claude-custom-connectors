@@ -19,27 +19,15 @@ function getAccountId(accessToken: string): string {
     }
     const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
 
-    // Log the full JWT payload so we can identify the correct claim
-    console.log("[WFM] JWT payload claims:", JSON.stringify(payload, null, 2));
-
-    // Try every plausible claim name for the organisation ID
-    const accountId =
-      payload.org_id ||
-      payload.organisation_id ||
-      payload.organization_id ||
-      payload.account_id ||
-      payload.xero_tenant_id ||
-      payload.tenant_id ||
-      payload.wfm_org_id ||
-      payload.oid ||
-      payload.tid;
+    // WorkflowMax JWT uses "aud" for the organisation/account ID
+    const accountId = payload.aud;
     if (!accountId) {
-      // Don't fall back to sub — it's the user ID, not the org ID
       throw new Error(
-        "No organisation ID found in token. JWT claims: " +
-          JSON.stringify(payload)
+        "No organisation ID (aud) found in token. JWT claims: " +
+          Object.keys(payload).join(", ")
       );
     }
+    console.log("[WFM] Using account_id:", accountId);
     return accountId;
   } catch (e) {
     if (e instanceof SyntaxError) {
