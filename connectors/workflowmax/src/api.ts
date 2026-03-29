@@ -15,18 +15,25 @@ function getAccountId(accessToken: string): string {
   try {
     const parts = accessToken.split(".");
     if (parts.length !== 3) {
-      throw new Error("Token is not a valid JWT");
+      throw new Error("Token is not a valid JWT (expected 3 parts, got " + parts.length + ")");
     }
-    const payload = JSON.parse(Buffer.from(parts[1], "base64").toString());
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
+    // Try every plausible claim name for the organisation ID
     const accountId =
       payload.org_id ||
       payload.organisation_id ||
+      payload.organization_id ||
       payload.account_id ||
       payload.xero_tenant_id ||
-      payload.tenant_id;
+      payload.tenant_id ||
+      payload.wfm_org_id ||
+      payload.oid ||
+      payload.tid ||
+      payload.sub;
     if (!accountId) {
       throw new Error(
-        "No organisation ID found in token. Ensure the OAuth flow completed correctly with parameters in the request body (not headers)."
+        "No organisation ID found in token. JWT claims present: " +
+          Object.keys(payload).join(", ")
       );
     }
     return accountId;
