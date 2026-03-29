@@ -3,11 +3,50 @@ import { apiRequest } from "@custom-connectors/shared";
 const BASE_URL = "https://api.workflowmax.com";
 
 // ---------------------------------------------------------------------------
+// Organisation ID from JWT
+// ---------------------------------------------------------------------------
+
+/**
+ * Decode the JWT access token to extract the WorkflowMax organisation ID.
+ * The access token is a JWT whose payload contains the org ID.
+ * Every API request must include this as the `account_id` header.
+ */
+function getAccountId(accessToken: string): string {
+  try {
+    const parts = accessToken.split(".");
+    if (parts.length !== 3) {
+      throw new Error("Token is not a valid JWT");
+    }
+    const payload = JSON.parse(Buffer.from(parts[1], "base64").toString());
+    const accountId =
+      payload.org_id ||
+      payload.organisation_id ||
+      payload.account_id ||
+      payload.xero_tenant_id ||
+      payload.tenant_id;
+    if (!accountId) {
+      throw new Error(
+        "No organisation ID found in token. Ensure the OAuth flow completed correctly with parameters in the request body (not headers)."
+      );
+    }
+    return accountId;
+  } catch (e) {
+    if (e instanceof SyntaxError) {
+      throw new Error("Failed to decode access token JWT payload.");
+    }
+    throw e;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
 
 function authHeaders(accessToken: string) {
-  return { Authorization: `Bearer ${accessToken}` };
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    account_id: getAccountId(accessToken),
+  };
 }
 
 function qs(params: Record<string, string | number | undefined>): string {

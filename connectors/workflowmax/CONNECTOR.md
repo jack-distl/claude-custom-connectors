@@ -8,9 +8,13 @@ Connects Claude to [WorkflowMax by BlueRock](https://www.workflowmax.com/) — a
 - **Scopes:** `openid profile email workflowmax offline_access`
 - **Authorize URL:** `https://oauth.workflowmax.com/oauth/authorize`
 - **Token URL:** `https://oauth.workflowmax.com/oauth/token`
+- **API Base URL:** `https://api.workflowmax.com`
 - **Token lifetime:** Access tokens expire after 30 minutes; refresh tokens after 60 days.
+- **Account ID:** Every API request requires an `account_id` header containing the organisation ID. The connector automatically decodes this from the JWT access token.
 
 > **Note:** OAuth is handled by the MCP transport layer. Access tokens are NOT passed as tool parameters — they flow automatically via the MCP session. The connector reads the token from `extra.authInfo.token` in each tool handler.
+>
+> **Important:** Staff members must have "Authorise 3rd Party Full Access" enabled in their WorkflowMax profile settings for OAuth to work.
 
 ## Tools
 
@@ -94,12 +98,12 @@ Connects Claude to [WorkflowMax by BlueRock](https://www.workflowmax.com/) — a
 | Variable | Description | Where to get it |
 |----------|-------------|-----------------|
 | `SERVER_URL` | Public URL of this Railway service (required for OAuth callbacks) | Railway → Settings → Networking → Generate Domain |
-| `CLIENT_ID` | OAuth client ID | WorkflowMax developer/OAuth app settings |
+| `CLIENT_ID` | OAuth client ID | WorkflowMax developer application |
 | `CLIENT_SECRET` | OAuth client secret | Same as above |
 
 ## Setup Checklist
 
-1. **Create an OAuth app** in WorkflowMax by BlueRock — note the client ID and secret
+1. **Create a developer application** at the [WorkflowMax developer portal](https://oauth.workflowmax.com/) — note the client ID and secret
 2. **Deploy to Railway** — create a new service pointing to this repo, set the Dockerfile path to `connectors/workflowmax/Dockerfile`
 3. **Set environment variables** in Railway:
    - `CLIENT_ID` — from your OAuth app
