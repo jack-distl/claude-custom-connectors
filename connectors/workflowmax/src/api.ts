@@ -65,40 +65,11 @@ function getAccountId(accessToken: string): string {
 
 function authHeaders(accessToken: string) {
   const accountId = getAccountId(accessToken);
-  console.log("[WFM] Request headers: account-id=" + accountId);
   return {
     Authorization: `Bearer ${accessToken}`,
     "account-id": accountId,
   };
 }
-
-/**
- * Diagnostic: call /v2/me and /v2/accounts to verify token and find real account ID.
- * Called once on first API request per token.
- */
-async function diagnoseAuth(accessToken: string): Promise<void> {
-  const headers = { Authorization: `Bearer ${accessToken}` };
-
-  // Try /v2/me with just bearer token
-  try {
-    const meRes = await fetch(`${BASE_URL}/me`, { headers });
-    const meBody = await meRes.text();
-    console.log(`[WFM] DIAG GET /v2/me → ${meRes.status}: ${meBody}`);
-  } catch (e) {
-    console.error("[WFM] DIAG /v2/me failed:", e);
-  }
-
-  // Try /v2/accounts with just bearer token
-  try {
-    const accRes = await fetch(`${BASE_URL}/accounts`, { headers });
-    const accBody = await accRes.text();
-    console.log(`[WFM] DIAG GET /v2/accounts → ${accRes.status}: ${accBody}`);
-  } catch (e) {
-    console.error("[WFM] DIAG /v2/accounts failed:", e);
-  }
-}
-
-let diagnosed = false;
 
 /**
  * Make an API request to WorkflowMax with full error logging.
@@ -109,14 +80,7 @@ async function wfmRequest<T = unknown>(
 ): Promise<T> {
   const { method = "GET", headers = {}, body } = options;
 
-  // Run diagnostic on first request to log token validity and account info
-  if (!diagnosed) {
-    diagnosed = true;
-    const token = headers["Authorization"]?.replace("Bearer ", "") || "";
-    if (token) await diagnoseAuth(token);
-  }
-
-  console.log(`[WFM] ${method} ${url}`);
+  console.log(`[WFM] ${method} ${url} | account-id=${headers["account-id"] || "not set"}`);
 
   const response = await fetch(url, {
     method,
@@ -129,7 +93,9 @@ async function wfmRequest<T = unknown>(
 
   if (!response.ok) {
     const errorBody = await response.text();
+    const respHeaders = Object.fromEntries(response.headers.entries());
     console.error(`[WFM] API error ${response.status}: ${errorBody}`);
+    console.error(`[WFM] Response headers:`, JSON.stringify(respHeaders));
     throw new ConnectorError(
       `WorkflowMax API error (${response.status}): ${errorBody}`,
       response.status === 401 ? "AUTH_ERROR" : "API_ERROR",
