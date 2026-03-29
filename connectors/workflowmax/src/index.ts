@@ -9,8 +9,8 @@ const config = {
   version: "1.0.0",
   oauth: {
     serverUrl: process.env.SERVER_URL || "http://localhost:3000",
-    authorizeUrl: "https://oauth.workflowmax.com/oauth/authorize",
-    tokenUrl: "https://oauth.workflowmax.com/oauth/token",
+    authorizeUrl: "https://login.xero.com/identity/connect/authorize",
+    tokenUrl: "https://identity.xero.com/connect/token",
     clientId: process.env.CLIENT_ID!,
     clientSecret: process.env.CLIENT_SECRET!,
     scopes: ["openid", "profile", "email", "workflowmax", "offline_access"],

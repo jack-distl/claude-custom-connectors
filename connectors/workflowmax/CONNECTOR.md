@@ -4,13 +4,17 @@
 Connects Claude to [WorkflowMax by BlueRock](https://www.workflowmax.com/) — a practice management platform for professional services. Provides read & write access to clients, jobs, timesheets, invoices, quotes, leads, contacts, staff, costs, and tasks.
 
 ## Authentication
-- **Type:** OAuth2 Authorization Code
+- **Type:** OAuth2 Authorization Code (via Xero identity)
 - **Scopes:** `openid profile email workflowmax offline_access`
-- **Authorize URL:** `https://oauth.workflowmax.com/oauth/authorize`
-- **Token URL:** `https://oauth.workflowmax.com/oauth/token`
-- **Token lifetime:** Access tokens expire after 30 minutes; refresh tokens after 60 days.
+- **Authorize URL:** `https://login.xero.com/identity/connect/authorize`
+- **Token URL:** `https://identity.xero.com/connect/token`
+- **API Base URL:** `https://api.xero.com/workflowmax/3.0`
+- **Token lifetime:** Access tokens expire after ~12 minutes; refresh tokens after 60 days.
+- **Tenant ID:** Every API request requires a `xero-tenant-id` header. The connector automatically fetches this from `https://api.xero.com/connections` and caches it.
 
 > **Note:** OAuth is handled by the MCP transport layer. Access tokens are NOT passed as tool parameters — they flow automatically via the MCP session. The connector reads the token from `extra.authInfo.token` in each tool handler.
+>
+> **Important:** Staff members must have "Authorise 3rd Party Full Access" enabled in their WorkflowMax profile settings for OAuth to work.
 
 ## Tools
 
@@ -94,12 +98,12 @@ Connects Claude to [WorkflowMax by BlueRock](https://www.workflowmax.com/) — a
 | Variable | Description | Where to get it |
 |----------|-------------|-----------------|
 | `SERVER_URL` | Public URL of this Railway service (required for OAuth callbacks) | Railway → Settings → Networking → Generate Domain |
-| `CLIENT_ID` | OAuth client ID | WorkflowMax developer/OAuth app settings |
+| `CLIENT_ID` | OAuth client ID | [developer.xero.com/myapps](https://developer.xero.com/myapps) |
 | `CLIENT_SECRET` | OAuth client secret | Same as above |
 
 ## Setup Checklist
 
-1. **Create an OAuth app** in WorkflowMax by BlueRock — note the client ID and secret
+1. **Create an OAuth app** at [developer.xero.com/myapps](https://developer.xero.com/myapps) — note the client ID and secret
 2. **Deploy to Railway** — create a new service pointing to this repo, set the Dockerfile path to `connectors/workflowmax/Dockerfile`
 3. **Set environment variables** in Railway:
    - `CLIENT_ID` — from your OAuth app

@@ -1,13 +1,64 @@
 import { apiRequest } from "@custom-connectors/shared";
 
-const BASE_URL = "https://api.workflowmax.com";
+const BASE_URL = "https://api.xero.com/workflowmax/3.0";
+const CONNECTIONS_URL = "https://api.xero.com/connections";
+
+// ---------------------------------------------------------------------------
+// Tenant ID resolution
+// ---------------------------------------------------------------------------
+
+const tenantIdCache = new Map<string, { tenantId: string; expiresAt: number }>();
+
+interface XeroConnection {
+  id: string;
+  tenantId: string;
+  tenantName: string;
+  tenantType: string;
+}
+
+/**
+ * Fetch the WorkflowMax tenant ID from the Xero connections endpoint.
+ * The xero-tenant-id header is required on every API request.
+ * Results are cached per access token for 10 minutes.
+ */
+async function getTenantId(accessToken: string): Promise<string> {
+  const cached = tenantIdCache.get(accessToken);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.tenantId;
+  }
+
+  const connections = await apiRequest<XeroConnection[]>(CONNECTIONS_URL, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  const wfmConnection = connections.find(
+    (c) => c.tenantType === "WORKFLOWMAX"
+  ) || connections[0];
+
+  if (!wfmConnection) {
+    throw new Error(
+      "No WorkflowMax organisation found. Ensure the user has authorised a WorkflowMax organisation."
+    );
+  }
+
+  tenantIdCache.set(accessToken, {
+    tenantId: wfmConnection.tenantId,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+  });
+
+  return wfmConnection.tenantId;
+}
 
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-function authHeaders(accessToken: string) {
-  return { Authorization: `Bearer ${accessToken}` };
+async function authHeaders(accessToken: string) {
+  const tenantId = await getTenantId(accessToken);
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    "xero-tenant-id": tenantId,
+  };
 }
 
 function qs(params: Record<string, string | number | undefined>): string {
@@ -166,7 +217,7 @@ export async function listClients(
 ): Promise<PaginatedResponse<WfmClient>> {
   return apiRequest<PaginatedResponse<WfmClient>>(
     `${BASE_URL}/clients${qs({ query: params.query, page: params.page, pageSize: params.pageSize })}`,
-    { headers: authHeaders(accessToken) }
+    { headers: await authHeaders(accessToken) }
   );
 }
 
@@ -175,7 +226,7 @@ export async function getClient(
   clientId: string
 ): Promise<WfmClient> {
   return apiRequest<WfmClient>(`${BASE_URL}/clients/${clientId}`, {
-    headers: authHeaders(accessToken),
+    headers: await authHeaders(accessToken),
   });
 }
 
@@ -185,7 +236,7 @@ export async function createClient(
 ): Promise<WfmClient> {
   return apiRequest<WfmClient>(`${BASE_URL}/clients`, {
     method: "POST",
-    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    headers: { ...await authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
 }
@@ -197,7 +248,7 @@ export async function updateClient(
 ): Promise<WfmClient> {
   return apiRequest<WfmClient>(`${BASE_URL}/clients/${clientId}`, {
     method: "PUT",
-    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    headers: { ...await authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
 }
@@ -208,7 +259,7 @@ export async function deleteClient(
 ): Promise<void> {
   await apiRequest(`${BASE_URL}/clients/${clientId}`, {
     method: "DELETE",
-    headers: authHeaders(accessToken),
+    headers: await authHeaders(accessToken),
   });
 }
 
@@ -222,7 +273,7 @@ export async function listContacts(
 ): Promise<PaginatedResponse<WfmContact>> {
   return apiRequest<PaginatedResponse<WfmContact>>(
     `${BASE_URL}/contacts${qs({ clientId: params.clientId, page: params.page, pageSize: params.pageSize })}`,
-    { headers: authHeaders(accessToken) }
+    { headers: await authHeaders(accessToken) }
   );
 }
 
@@ -231,7 +282,7 @@ export async function getContact(
   contactId: string
 ): Promise<WfmContact> {
   return apiRequest<WfmContact>(`${BASE_URL}/contacts/${contactId}`, {
-    headers: authHeaders(accessToken),
+    headers: await authHeaders(accessToken),
   });
 }
 
@@ -241,7 +292,7 @@ export async function createContact(
 ): Promise<WfmContact> {
   return apiRequest<WfmContact>(`${BASE_URL}/contacts`, {
     method: "POST",
-    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    headers: { ...await authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
 }
@@ -253,7 +304,7 @@ export async function updateContact(
 ): Promise<WfmContact> {
   return apiRequest<WfmContact>(`${BASE_URL}/contacts/${contactId}`, {
     method: "PUT",
-    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    headers: { ...await authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
 }
@@ -268,7 +319,7 @@ export async function listJobs(
 ): Promise<PaginatedResponse<WfmJob>> {
   return apiRequest<PaginatedResponse<WfmJob>>(
     `${BASE_URL}/jobs${qs({ status: params.status, clientId: params.clientId, page: params.page, pageSize: params.pageSize })}`,
-    { headers: authHeaders(accessToken) }
+    { headers: await authHeaders(accessToken) }
   );
 }
 
@@ -277,7 +328,7 @@ export async function getJob(
   jobId: string
 ): Promise<WfmJob> {
   return apiRequest<WfmJob>(`${BASE_URL}/jobs/${jobId}`, {
-    headers: authHeaders(accessToken),
+    headers: await authHeaders(accessToken),
   });
 }
 
@@ -287,7 +338,7 @@ export async function createJob(
 ): Promise<WfmJob> {
   return apiRequest<WfmJob>(`${BASE_URL}/jobs`, {
     method: "POST",
-    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    headers: { ...await authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
 }
@@ -299,7 +350,7 @@ export async function updateJob(
 ): Promise<WfmJob> {
   return apiRequest<WfmJob>(`${BASE_URL}/jobs/${jobId}`, {
     method: "PUT",
-    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    headers: { ...await authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
 }
@@ -310,7 +361,7 @@ export async function deleteJob(
 ): Promise<void> {
   await apiRequest(`${BASE_URL}/jobs/${jobId}`, {
     method: "DELETE",
-    headers: authHeaders(accessToken),
+    headers: await authHeaders(accessToken),
   });
 }
 
@@ -324,7 +375,7 @@ export async function listTimesheets(
 ): Promise<PaginatedResponse<WfmTimesheet>> {
   return apiRequest<PaginatedResponse<WfmTimesheet>>(
     `${BASE_URL}/timesheets${qs({ jobId: params.jobId, staffId: params.staffId, from: params.from, to: params.to, page: params.page, pageSize: params.pageSize })}`,
-    { headers: authHeaders(accessToken) }
+    { headers: await authHeaders(accessToken) }
   );
 }
 
@@ -333,7 +384,7 @@ export async function getTimesheet(
   timesheetId: string
 ): Promise<WfmTimesheet> {
   return apiRequest<WfmTimesheet>(`${BASE_URL}/timesheets/${timesheetId}`, {
-    headers: authHeaders(accessToken),
+    headers: await authHeaders(accessToken),
   });
 }
 
@@ -343,7 +394,7 @@ export async function createTimesheet(
 ): Promise<WfmTimesheet> {
   return apiRequest<WfmTimesheet>(`${BASE_URL}/timesheets`, {
     method: "POST",
-    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    headers: { ...await authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
 }
@@ -355,7 +406,7 @@ export async function updateTimesheet(
 ): Promise<WfmTimesheet> {
   return apiRequest<WfmTimesheet>(`${BASE_URL}/timesheets/${timesheetId}`, {
     method: "PUT",
-    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    headers: { ...await authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
 }
@@ -366,7 +417,7 @@ export async function deleteTimesheet(
 ): Promise<void> {
   await apiRequest(`${BASE_URL}/timesheets/${timesheetId}`, {
     method: "DELETE",
-    headers: authHeaders(accessToken),
+    headers: await authHeaders(accessToken),
   });
 }
 
@@ -380,7 +431,7 @@ export async function listInvoices(
 ): Promise<PaginatedResponse<WfmInvoice>> {
   return apiRequest<PaginatedResponse<WfmInvoice>>(
     `${BASE_URL}/invoices${qs({ status: params.status, clientId: params.clientId, from: params.from, to: params.to, page: params.page, pageSize: params.pageSize })}`,
-    { headers: authHeaders(accessToken) }
+    { headers: await authHeaders(accessToken) }
   );
 }
 
@@ -389,7 +440,7 @@ export async function getInvoice(
   invoiceId: string
 ): Promise<WfmInvoice> {
   return apiRequest<WfmInvoice>(`${BASE_URL}/invoices/${invoiceId}`, {
-    headers: authHeaders(accessToken),
+    headers: await authHeaders(accessToken),
   });
 }
 
@@ -403,7 +454,7 @@ export async function listQuotes(
 ): Promise<PaginatedResponse<WfmQuote>> {
   return apiRequest<PaginatedResponse<WfmQuote>>(
     `${BASE_URL}/quotes${qs({ clientId: params.clientId, state: params.state, page: params.page, pageSize: params.pageSize })}`,
-    { headers: authHeaders(accessToken) }
+    { headers: await authHeaders(accessToken) }
   );
 }
 
@@ -412,7 +463,7 @@ export async function getQuote(
   quoteId: string
 ): Promise<WfmQuote> {
   return apiRequest<WfmQuote>(`${BASE_URL}/quotes/${quoteId}`, {
-    headers: authHeaders(accessToken),
+    headers: await authHeaders(accessToken),
   });
 }
 
@@ -426,7 +477,7 @@ export async function listLeads(
 ): Promise<PaginatedResponse<WfmLead>> {
   return apiRequest<PaginatedResponse<WfmLead>>(
     `${BASE_URL}/leads${qs({ status: params.status, categoryId: params.categoryId, page: params.page, pageSize: params.pageSize })}`,
-    { headers: authHeaders(accessToken) }
+    { headers: await authHeaders(accessToken) }
   );
 }
 
@@ -436,7 +487,7 @@ export async function createLead(
 ): Promise<WfmLead> {
   return apiRequest<WfmLead>(`${BASE_URL}/leads`, {
     method: "POST",
-    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    headers: { ...await authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
 }
@@ -451,7 +502,7 @@ export async function listStaff(
 ): Promise<PaginatedResponse<WfmStaff>> {
   return apiRequest<PaginatedResponse<WfmStaff>>(
     `${BASE_URL}/staff${qs({ page: params.page, pageSize: params.pageSize })}`,
-    { headers: authHeaders(accessToken) }
+    { headers: await authHeaders(accessToken) }
   );
 }
 
@@ -460,7 +511,7 @@ export async function getStaffMember(
   staffId: string
 ): Promise<WfmStaff> {
   return apiRequest<WfmStaff>(`${BASE_URL}/staff/${staffId}`, {
-    headers: authHeaders(accessToken),
+    headers: await authHeaders(accessToken),
   });
 }
 
@@ -474,7 +525,7 @@ export async function listCosts(
 ): Promise<PaginatedResponse<WfmCost>> {
   return apiRequest<PaginatedResponse<WfmCost>>(
     `${BASE_URL}/jobs/${params.jobId}/costs${qs({ page: params.page, pageSize: params.pageSize })}`,
-    { headers: authHeaders(accessToken) }
+    { headers: await authHeaders(accessToken) }
   );
 }
 
@@ -485,7 +536,7 @@ export async function createCost(
 ): Promise<WfmCost> {
   return apiRequest<WfmCost>(`${BASE_URL}/jobs/${jobId}/costs`, {
     method: "POST",
-    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    headers: { ...await authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
 }
@@ -497,7 +548,7 @@ export async function updateCost(
 ): Promise<WfmCost> {
   return apiRequest<WfmCost>(`${BASE_URL}/costs/${costId}`, {
     method: "PUT",
-    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    headers: { ...await authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
 }
@@ -508,7 +559,7 @@ export async function deleteCost(
 ): Promise<void> {
   await apiRequest(`${BASE_URL}/costs/${costId}`, {
     method: "DELETE",
-    headers: authHeaders(accessToken),
+    headers: await authHeaders(accessToken),
   });
 }
 
@@ -525,7 +576,7 @@ export async function listTasks(
     : `${BASE_URL}/tasks`;
   return apiRequest<PaginatedResponse<WfmTask>>(
     `${base}${qs({ page: params.page, pageSize: params.pageSize })}`,
-    { headers: authHeaders(accessToken) }
+    { headers: await authHeaders(accessToken) }
   );
 }
 
@@ -534,7 +585,7 @@ export async function getTask(
   taskId: string
 ): Promise<WfmTask> {
   return apiRequest<WfmTask>(`${BASE_URL}/tasks/${taskId}`, {
-    headers: authHeaders(accessToken),
+    headers: await authHeaders(accessToken),
   });
 }
 
@@ -544,7 +595,7 @@ export async function createTask(
 ): Promise<WfmTask> {
   return apiRequest<WfmTask>(`${BASE_URL}/tasks`, {
     method: "POST",
-    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    headers: { ...await authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
 }
@@ -556,7 +607,7 @@ export async function updateTask(
 ): Promise<WfmTask> {
   return apiRequest<WfmTask>(`${BASE_URL}/tasks/${taskId}`, {
     method: "PUT",
-    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    headers: { ...await authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
 }
@@ -567,6 +618,6 @@ export async function deleteTask(
 ): Promise<void> {
   await apiRequest(`${BASE_URL}/tasks/${taskId}`, {
     method: "DELETE",
-    headers: authHeaders(accessToken),
+    headers: await authHeaders(accessToken),
   });
 }
