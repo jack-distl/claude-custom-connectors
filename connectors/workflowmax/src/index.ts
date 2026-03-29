@@ -9,7 +9,7 @@ const config = {
   version: "1.0.0",
   oauth: {
     serverUrl: process.env.SERVER_URL || "http://localhost:3000",
-    authorizeUrl: "https://oauth.workflowmax.com/oauth/authorize",
+    authorizeUrl: "https://oauth.workflowmax.com/oauth/authorize?prompt=consent",
     tokenUrl: "https://oauth.workflowmax.com/oauth/token",
     clientId: process.env.CLIENT_ID!,
     clientSecret: process.env.CLIENT_SECRET!,
