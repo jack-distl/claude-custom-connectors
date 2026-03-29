@@ -1,4 +1,4 @@
-import { apiRequest } from "@custom-connectors/shared";
+import { ConnectorError } from "@custom-connectors/shared";
 
 const BASE_URL = "https://api.workflowmax.com";
 
@@ -46,6 +46,41 @@ function authHeaders(accessToken: string) {
     Authorization: `Bearer ${accessToken}`,
     account_id: getAccountId(accessToken),
   };
+}
+
+/**
+ * Make an API request to WorkflowMax with full error logging.
+ * Unlike the shared wfmRequest, this logs the actual response body on errors
+ * so we can diagnose auth issues.
+ */
+async function wfmRequest<T = unknown>(
+  url: string,
+  options: { method?: string; headers?: Record<string, string>; body?: string }
+): Promise<T> {
+  const { method = "GET", headers = {}, body } = options;
+
+  console.log(`[WFM] ${method} ${url}`);
+
+  const response = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      ...headers,
+    },
+    body,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    console.error(`[WFM] API error ${response.status}: ${errorBody}`);
+    throw new ConnectorError(
+      `WorkflowMax API error (${response.status}): ${errorBody}`,
+      response.status === 401 ? "AUTH_ERROR" : "API_ERROR",
+      response.status
+    );
+  }
+
+  return (await response.json()) as T;
 }
 
 function qs(params: Record<string, string | number | undefined>): string {
@@ -202,7 +237,7 @@ export async function listClients(
   accessToken: string,
   params: { query?: string; page?: number; pageSize?: number }
 ): Promise<PaginatedResponse<WfmClient>> {
-  return apiRequest<PaginatedResponse<WfmClient>>(
+  return wfmRequest<PaginatedResponse<WfmClient>>(
     `${BASE_URL}/clients${qs({ query: params.query, page: params.page, pageSize: params.pageSize })}`,
     { headers: authHeaders(accessToken) }
   );
@@ -212,7 +247,7 @@ export async function getClient(
   accessToken: string,
   clientId: string
 ): Promise<WfmClient> {
-  return apiRequest<WfmClient>(`${BASE_URL}/clients/${clientId}`, {
+  return wfmRequest<WfmClient>(`${BASE_URL}/clients/${clientId}`, {
     headers: authHeaders(accessToken),
   });
 }
@@ -221,7 +256,7 @@ export async function createClient(
   accessToken: string,
   data: Partial<WfmClient>
 ): Promise<WfmClient> {
-  return apiRequest<WfmClient>(`${BASE_URL}/clients`, {
+  return wfmRequest<WfmClient>(`${BASE_URL}/clients`, {
     method: "POST",
     headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -233,7 +268,7 @@ export async function updateClient(
   clientId: string,
   data: Partial<WfmClient>
 ): Promise<WfmClient> {
-  return apiRequest<WfmClient>(`${BASE_URL}/clients/${clientId}`, {
+  return wfmRequest<WfmClient>(`${BASE_URL}/clients/${clientId}`, {
     method: "PUT",
     headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -244,7 +279,7 @@ export async function deleteClient(
   accessToken: string,
   clientId: string
 ): Promise<void> {
-  await apiRequest(`${BASE_URL}/clients/${clientId}`, {
+  await wfmRequest(`${BASE_URL}/clients/${clientId}`, {
     method: "DELETE",
     headers: authHeaders(accessToken),
   });
@@ -258,7 +293,7 @@ export async function listContacts(
   accessToken: string,
   params: { clientId?: string; page?: number; pageSize?: number }
 ): Promise<PaginatedResponse<WfmContact>> {
-  return apiRequest<PaginatedResponse<WfmContact>>(
+  return wfmRequest<PaginatedResponse<WfmContact>>(
     `${BASE_URL}/contacts${qs({ clientId: params.clientId, page: params.page, pageSize: params.pageSize })}`,
     { headers: authHeaders(accessToken) }
   );
@@ -268,7 +303,7 @@ export async function getContact(
   accessToken: string,
   contactId: string
 ): Promise<WfmContact> {
-  return apiRequest<WfmContact>(`${BASE_URL}/contacts/${contactId}`, {
+  return wfmRequest<WfmContact>(`${BASE_URL}/contacts/${contactId}`, {
     headers: authHeaders(accessToken),
   });
 }
@@ -277,7 +312,7 @@ export async function createContact(
   accessToken: string,
   data: Partial<WfmContact>
 ): Promise<WfmContact> {
-  return apiRequest<WfmContact>(`${BASE_URL}/contacts`, {
+  return wfmRequest<WfmContact>(`${BASE_URL}/contacts`, {
     method: "POST",
     headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -289,7 +324,7 @@ export async function updateContact(
   contactId: string,
   data: Partial<WfmContact>
 ): Promise<WfmContact> {
-  return apiRequest<WfmContact>(`${BASE_URL}/contacts/${contactId}`, {
+  return wfmRequest<WfmContact>(`${BASE_URL}/contacts/${contactId}`, {
     method: "PUT",
     headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -304,7 +339,7 @@ export async function listJobs(
   accessToken: string,
   params: { status?: string; clientId?: string; page?: number; pageSize?: number }
 ): Promise<PaginatedResponse<WfmJob>> {
-  return apiRequest<PaginatedResponse<WfmJob>>(
+  return wfmRequest<PaginatedResponse<WfmJob>>(
     `${BASE_URL}/jobs${qs({ status: params.status, clientId: params.clientId, page: params.page, pageSize: params.pageSize })}`,
     { headers: authHeaders(accessToken) }
   );
@@ -314,7 +349,7 @@ export async function getJob(
   accessToken: string,
   jobId: string
 ): Promise<WfmJob> {
-  return apiRequest<WfmJob>(`${BASE_URL}/jobs/${jobId}`, {
+  return wfmRequest<WfmJob>(`${BASE_URL}/jobs/${jobId}`, {
     headers: authHeaders(accessToken),
   });
 }
@@ -323,7 +358,7 @@ export async function createJob(
   accessToken: string,
   data: Partial<WfmJob>
 ): Promise<WfmJob> {
-  return apiRequest<WfmJob>(`${BASE_URL}/jobs`, {
+  return wfmRequest<WfmJob>(`${BASE_URL}/jobs`, {
     method: "POST",
     headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -335,7 +370,7 @@ export async function updateJob(
   jobId: string,
   data: Partial<WfmJob>
 ): Promise<WfmJob> {
-  return apiRequest<WfmJob>(`${BASE_URL}/jobs/${jobId}`, {
+  return wfmRequest<WfmJob>(`${BASE_URL}/jobs/${jobId}`, {
     method: "PUT",
     headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -346,7 +381,7 @@ export async function deleteJob(
   accessToken: string,
   jobId: string
 ): Promise<void> {
-  await apiRequest(`${BASE_URL}/jobs/${jobId}`, {
+  await wfmRequest(`${BASE_URL}/jobs/${jobId}`, {
     method: "DELETE",
     headers: authHeaders(accessToken),
   });
@@ -360,7 +395,7 @@ export async function listTimesheets(
   accessToken: string,
   params: { jobId?: string; staffId?: string; from?: string; to?: string; page?: number; pageSize?: number }
 ): Promise<PaginatedResponse<WfmTimesheet>> {
-  return apiRequest<PaginatedResponse<WfmTimesheet>>(
+  return wfmRequest<PaginatedResponse<WfmTimesheet>>(
     `${BASE_URL}/timesheets${qs({ jobId: params.jobId, staffId: params.staffId, from: params.from, to: params.to, page: params.page, pageSize: params.pageSize })}`,
     { headers: authHeaders(accessToken) }
   );
@@ -370,7 +405,7 @@ export async function getTimesheet(
   accessToken: string,
   timesheetId: string
 ): Promise<WfmTimesheet> {
-  return apiRequest<WfmTimesheet>(`${BASE_URL}/timesheets/${timesheetId}`, {
+  return wfmRequest<WfmTimesheet>(`${BASE_URL}/timesheets/${timesheetId}`, {
     headers: authHeaders(accessToken),
   });
 }
@@ -379,7 +414,7 @@ export async function createTimesheet(
   accessToken: string,
   data: Partial<WfmTimesheet>
 ): Promise<WfmTimesheet> {
-  return apiRequest<WfmTimesheet>(`${BASE_URL}/timesheets`, {
+  return wfmRequest<WfmTimesheet>(`${BASE_URL}/timesheets`, {
     method: "POST",
     headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -391,7 +426,7 @@ export async function updateTimesheet(
   timesheetId: string,
   data: Partial<WfmTimesheet>
 ): Promise<WfmTimesheet> {
-  return apiRequest<WfmTimesheet>(`${BASE_URL}/timesheets/${timesheetId}`, {
+  return wfmRequest<WfmTimesheet>(`${BASE_URL}/timesheets/${timesheetId}`, {
     method: "PUT",
     headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -402,7 +437,7 @@ export async function deleteTimesheet(
   accessToken: string,
   timesheetId: string
 ): Promise<void> {
-  await apiRequest(`${BASE_URL}/timesheets/${timesheetId}`, {
+  await wfmRequest(`${BASE_URL}/timesheets/${timesheetId}`, {
     method: "DELETE",
     headers: authHeaders(accessToken),
   });
@@ -416,7 +451,7 @@ export async function listInvoices(
   accessToken: string,
   params: { status?: string; clientId?: string; from?: string; to?: string; page?: number; pageSize?: number }
 ): Promise<PaginatedResponse<WfmInvoice>> {
-  return apiRequest<PaginatedResponse<WfmInvoice>>(
+  return wfmRequest<PaginatedResponse<WfmInvoice>>(
     `${BASE_URL}/invoices${qs({ status: params.status, clientId: params.clientId, from: params.from, to: params.to, page: params.page, pageSize: params.pageSize })}`,
     { headers: authHeaders(accessToken) }
   );
@@ -426,7 +461,7 @@ export async function getInvoice(
   accessToken: string,
   invoiceId: string
 ): Promise<WfmInvoice> {
-  return apiRequest<WfmInvoice>(`${BASE_URL}/invoices/${invoiceId}`, {
+  return wfmRequest<WfmInvoice>(`${BASE_URL}/invoices/${invoiceId}`, {
     headers: authHeaders(accessToken),
   });
 }
@@ -439,7 +474,7 @@ export async function listQuotes(
   accessToken: string,
   params: { clientId?: string; state?: string; page?: number; pageSize?: number }
 ): Promise<PaginatedResponse<WfmQuote>> {
-  return apiRequest<PaginatedResponse<WfmQuote>>(
+  return wfmRequest<PaginatedResponse<WfmQuote>>(
     `${BASE_URL}/quotes${qs({ clientId: params.clientId, state: params.state, page: params.page, pageSize: params.pageSize })}`,
     { headers: authHeaders(accessToken) }
   );
@@ -449,7 +484,7 @@ export async function getQuote(
   accessToken: string,
   quoteId: string
 ): Promise<WfmQuote> {
-  return apiRequest<WfmQuote>(`${BASE_URL}/quotes/${quoteId}`, {
+  return wfmRequest<WfmQuote>(`${BASE_URL}/quotes/${quoteId}`, {
     headers: authHeaders(accessToken),
   });
 }
@@ -462,7 +497,7 @@ export async function listLeads(
   accessToken: string,
   params: { status?: string; categoryId?: string; page?: number; pageSize?: number }
 ): Promise<PaginatedResponse<WfmLead>> {
-  return apiRequest<PaginatedResponse<WfmLead>>(
+  return wfmRequest<PaginatedResponse<WfmLead>>(
     `${BASE_URL}/leads${qs({ status: params.status, categoryId: params.categoryId, page: params.page, pageSize: params.pageSize })}`,
     { headers: authHeaders(accessToken) }
   );
@@ -472,7 +507,7 @@ export async function createLead(
   accessToken: string,
   data: Partial<WfmLead>
 ): Promise<WfmLead> {
-  return apiRequest<WfmLead>(`${BASE_URL}/leads`, {
+  return wfmRequest<WfmLead>(`${BASE_URL}/leads`, {
     method: "POST",
     headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -487,7 +522,7 @@ export async function listStaff(
   accessToken: string,
   params: { page?: number; pageSize?: number }
 ): Promise<PaginatedResponse<WfmStaff>> {
-  return apiRequest<PaginatedResponse<WfmStaff>>(
+  return wfmRequest<PaginatedResponse<WfmStaff>>(
     `${BASE_URL}/staff${qs({ page: params.page, pageSize: params.pageSize })}`,
     { headers: authHeaders(accessToken) }
   );
@@ -497,7 +532,7 @@ export async function getStaffMember(
   accessToken: string,
   staffId: string
 ): Promise<WfmStaff> {
-  return apiRequest<WfmStaff>(`${BASE_URL}/staff/${staffId}`, {
+  return wfmRequest<WfmStaff>(`${BASE_URL}/staff/${staffId}`, {
     headers: authHeaders(accessToken),
   });
 }
@@ -510,7 +545,7 @@ export async function listCosts(
   accessToken: string,
   params: { jobId: string; page?: number; pageSize?: number }
 ): Promise<PaginatedResponse<WfmCost>> {
-  return apiRequest<PaginatedResponse<WfmCost>>(
+  return wfmRequest<PaginatedResponse<WfmCost>>(
     `${BASE_URL}/jobs/${params.jobId}/costs${qs({ page: params.page, pageSize: params.pageSize })}`,
     { headers: authHeaders(accessToken) }
   );
@@ -521,7 +556,7 @@ export async function createCost(
   jobId: string,
   data: Partial<WfmCost>
 ): Promise<WfmCost> {
-  return apiRequest<WfmCost>(`${BASE_URL}/jobs/${jobId}/costs`, {
+  return wfmRequest<WfmCost>(`${BASE_URL}/jobs/${jobId}/costs`, {
     method: "POST",
     headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -533,7 +568,7 @@ export async function updateCost(
   costId: string,
   data: Partial<WfmCost>
 ): Promise<WfmCost> {
-  return apiRequest<WfmCost>(`${BASE_URL}/costs/${costId}`, {
+  return wfmRequest<WfmCost>(`${BASE_URL}/costs/${costId}`, {
     method: "PUT",
     headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -544,7 +579,7 @@ export async function deleteCost(
   accessToken: string,
   costId: string
 ): Promise<void> {
-  await apiRequest(`${BASE_URL}/costs/${costId}`, {
+  await wfmRequest(`${BASE_URL}/costs/${costId}`, {
     method: "DELETE",
     headers: authHeaders(accessToken),
   });
@@ -561,7 +596,7 @@ export async function listTasks(
   const base = params.jobId
     ? `${BASE_URL}/jobs/${params.jobId}/tasks`
     : `${BASE_URL}/tasks`;
-  return apiRequest<PaginatedResponse<WfmTask>>(
+  return wfmRequest<PaginatedResponse<WfmTask>>(
     `${base}${qs({ page: params.page, pageSize: params.pageSize })}`,
     { headers: authHeaders(accessToken) }
   );
@@ -571,7 +606,7 @@ export async function getTask(
   accessToken: string,
   taskId: string
 ): Promise<WfmTask> {
-  return apiRequest<WfmTask>(`${BASE_URL}/tasks/${taskId}`, {
+  return wfmRequest<WfmTask>(`${BASE_URL}/tasks/${taskId}`, {
     headers: authHeaders(accessToken),
   });
 }
@@ -580,7 +615,7 @@ export async function createTask(
   accessToken: string,
   data: Partial<WfmTask>
 ): Promise<WfmTask> {
-  return apiRequest<WfmTask>(`${BASE_URL}/tasks`, {
+  return wfmRequest<WfmTask>(`${BASE_URL}/tasks`, {
     method: "POST",
     headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -592,7 +627,7 @@ export async function updateTask(
   taskId: string,
   data: Partial<WfmTask>
 ): Promise<WfmTask> {
-  return apiRequest<WfmTask>(`${BASE_URL}/tasks/${taskId}`, {
+  return wfmRequest<WfmTask>(`${BASE_URL}/tasks/${taskId}`, {
     method: "PUT",
     headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -603,7 +638,7 @@ export async function deleteTask(
   accessToken: string,
   taskId: string
 ): Promise<void> {
-  await apiRequest(`${BASE_URL}/tasks/${taskId}`, {
+  await wfmRequest(`${BASE_URL}/tasks/${taskId}`, {
     method: "DELETE",
     headers: authHeaders(accessToken),
   });
