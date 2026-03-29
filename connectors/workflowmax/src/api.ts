@@ -45,7 +45,7 @@ function getAccountId(accessToken: string): string {
 function authHeaders(accessToken: string) {
   return {
     Authorization: `Bearer ${accessToken}`,
-    account_id: getAccountId(accessToken),
+    "account-id": getAccountId(accessToken),
   };
 }
 
