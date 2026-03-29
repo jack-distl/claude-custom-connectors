@@ -306,14 +306,15 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_job",
-    "Get detailed information about a specific job, including tasks, costs, and timesheets.",
+    "Get detailed information about a specific job. Use the includes parameter to fetch related data like tasks, costs, notes, documents, staff, or phases.",
     {
       job_id: z.string().describe("The ID of the job to retrieve"),
+      includes: z.string().optional().describe("Comma-separated list of related data to include: tasks,costs,notes,documents,staff,phases"),
     },
     async (params, extra) => {
       try {
         const token = getAccessToken(extra);
-        const result = await api.getJob(token, params.job_id);
+        const result = await api.getJob(token, params.job_id, params.includes);
         return toolResult(result);
       } catch (error) {
         return errorResult(error);
@@ -945,6 +946,103 @@ export function registerTools(server: McpServer) {
         const token = getAccessToken(extra);
         await api.deleteTask(token, params.task_id);
         return toolResult({ success: true, message: "Task deleted successfully." });
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  // =========================================================================
+  // JOB TASKS (tasks assigned to specific jobs)
+  // =========================================================================
+
+  server.tool(
+    "list_job_tasks",
+    "List tasks assigned to a specific job. These are job-level task assignments, not global task templates.",
+    {
+      job_id: z.string().describe("Job UUID to list tasks for (required)"),
+      page: z.number().optional().describe("Page number for pagination"),
+      page_size: z.number().optional().describe("Number of results per page"),
+    },
+    async (params, extra) => {
+      try {
+        const token = getAccessToken(extra);
+        const result = await api.listJobTasks(token, {
+          jobId: params.job_id,
+          page: params.page,
+          pageSize: params.page_size,
+        });
+        return toolResult(result);
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  server.tool(
+    "create_job_task",
+    "Add a task to a job. Requires the global task template UUID and the job ID.",
+    {
+      job_id: z.string().describe("Job UUID or job number to add the task to (required)"),
+      task_uuid: z.string().describe("Global task template UUID to add to the job (required)"),
+      estimated_minutes: z.number().optional().describe("Estimated time in minutes"),
+      assigned_staff_id: z.string().optional().describe("Staff member UUID to assign"),
+      label: z.string().optional().describe("Label for the task assignment (e.g. 'Account Manager', 'SEO Specialist')"),
+    },
+    async (params, extra) => {
+      try {
+        const token = getAccessToken(extra);
+        const data: Partial<api.WfmJobTask> = {
+          taskId: params.task_uuid,
+        };
+        if (params.estimated_minutes !== undefined) data.estimatedMinutes = params.estimated_minutes;
+        if (params.assigned_staff_id !== undefined) data.assignedStaffId = params.assigned_staff_id;
+        if (params.label !== undefined) data.label = params.label;
+        const result = await api.createJobTask(token, params.job_id, data);
+        return toolResult(result);
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  server.tool(
+    "update_job_task",
+    "Update a task assignment within a job. This updates the job-level task, not the global task template. Provide only the fields you want to change.",
+    {
+      task_id: z.string().describe("The job task UUID (from list_job_tasks)"),
+      estimated_minutes: z.number().optional().describe("Estimated time in minutes"),
+      assigned_staff_id: z.string().optional().describe("Staff member UUID to assign"),
+      label: z.string().optional().describe("Label for the task assignment"),
+      status: z.string().optional().describe("Task status"),
+    },
+    async (params, extra) => {
+      try {
+        const token = getAccessToken(extra);
+        const data: Partial<api.WfmJobTask> = {};
+        if (params.estimated_minutes !== undefined) data.estimatedMinutes = params.estimated_minutes;
+        if (params.assigned_staff_id !== undefined) data.assignedStaffId = params.assigned_staff_id;
+        if (params.label !== undefined) data.label = params.label;
+        if (params.status !== undefined) data.status = params.status;
+        const result = await api.updateJobTask(token, params.task_id, data);
+        return toolResult(result);
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  server.tool(
+    "delete_job_task",
+    "Remove a task from a job. This removes the job-level assignment, not the global task template. This action cannot be undone.",
+    {
+      task_id: z.string().describe("The job task UUID to remove"),
+    },
+    async (params, extra) => {
+      try {
+        const token = getAccessToken(extra);
+        await api.deleteJobTask(token, params.task_id);
+        return toolResult({ success: true, message: "Job task removed successfully." });
       } catch (error) {
         return errorResult(error);
       }

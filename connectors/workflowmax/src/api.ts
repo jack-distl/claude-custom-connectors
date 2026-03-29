@@ -279,6 +279,18 @@ export interface WfmTask {
   assignedStaffId?: string;
 }
 
+export interface WfmJobTask {
+  id: string;
+  taskId?: string;
+  jobId?: string;
+  name?: string;
+  label?: string;
+  estimatedMinutes?: number;
+  actualMinutes?: number;
+  status?: string;
+  assignedStaffId?: string;
+}
+
 export interface PaginatedResponse<T> {
   data: T[];
   page?: number;
@@ -404,11 +416,13 @@ export async function listJobs(
 
 export async function getJob(
   accessToken: string,
-  jobId: string
+  jobId: string,
+  includes?: string
 ): Promise<WfmJob> {
-  return wfmRequest<WfmJob>(`${BASE_URL}/jobs/${jobId}`, {
-    headers: authHeaders(accessToken),
-  });
+  return wfmRequest<WfmJob>(
+    `${BASE_URL}/jobs/${jobId}${qs({ includes })}`,
+    { headers: authHeaders(accessToken) }
+  );
 }
 
 export async function createJob(
@@ -696,6 +710,54 @@ export async function deleteTask(
   taskId: string
 ): Promise<void> {
   await wfmRequest(`${BASE_URL}/tasks/${taskId}`, {
+    method: "DELETE",
+    headers: authHeaders(accessToken),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Job Tasks (tasks assigned to specific jobs)
+// ---------------------------------------------------------------------------
+
+export async function listJobTasks(
+  accessToken: string,
+  params: { jobId: string; page?: number; pageSize?: number }
+): Promise<PaginatedResponse<WfmJobTask>> {
+  return wfmRequest<PaginatedResponse<WfmJobTask>>(
+    `${BASE_URL}/jobs/tasks${qs({ job: params.jobId, page: params.page, pageSize: params.pageSize })}`,
+    { headers: authHeaders(accessToken) }
+  );
+}
+
+export async function createJobTask(
+  accessToken: string,
+  jobId: string,
+  data: Partial<WfmJobTask>
+): Promise<WfmJobTask> {
+  return wfmRequest<WfmJobTask>(`${BASE_URL}/jobs/${jobId}/tasks`, {
+    method: "POST",
+    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateJobTask(
+  accessToken: string,
+  taskId: string,
+  data: Partial<WfmJobTask>
+): Promise<WfmJobTask> {
+  return wfmRequest<WfmJobTask>(`${BASE_URL}/jobs/tasks/${taskId}`, {
+    method: "PUT",
+    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteJobTask(
+  accessToken: string,
+  taskId: string
+): Promise<void> {
+  await wfmRequest(`${BASE_URL}/jobs/tasks/${taskId}`, {
     method: "DELETE",
     headers: authHeaders(accessToken),
   });
