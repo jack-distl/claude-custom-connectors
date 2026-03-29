@@ -27,8 +27,9 @@ docs/                     → Deployment and setup guides
 ### Before writing any code, ask the user:
 1. **What third-party API** do you want to connect to? What specific actions (list, create, search, etc.)?
 2. **Have you created an OAuth app** with the provider? (If not, tell them what to do — e.g., "Go to developers.facebook.com, create an app, and get the client ID and secret")
-3. **What are the OAuth details?** Authorize URL, token URL, required scopes. (Research the API docs if the user doesn't know)
-4. **Any special auth requirements?** Some APIs need extra credentials (e.g., Google Ads requires a developer token in addition to OAuth)
+3. **What are the OAuth details?** Authorize URL, token URL, required scopes. **Find and read the official API documentation** — do NOT rely on web search summaries, which are frequently wrong about endpoints, auth flows, and header names.
+4. **Any special auth requirements?** Some APIs need extra credentials (e.g., Google Ads requires a developer token, WorkflowMax requires an organisation ID from Settings). Check whether any extra headers or IDs are needed beyond the OAuth token.
+5. **What is the exact API base URL and version prefix?** Many APIs require a version prefix like `/v2/` on all endpoints. Get this from the official API contract docs.
 
 ### After building the connector, tell the user what they need to do:
 Don't assume they know the next steps. Give them a clear checklist:
@@ -40,8 +41,8 @@ Don't assume they know the next steps. Give them a clear checklist:
    - `CLIENT_SECRET` — from the OAuth app you created
    - Any connector-specific vars (e.g., `GOOGLE_DEVELOPER_TOKEN`)
 3. **Deploy and generate a domain** — Deploy the service, then go to Settings → Networking → Generate Domain
-4. **Set SERVER_URL** — Copy the generated domain URL and add it as the `SERVER_URL` env var. This triggers a redeploy.
-5. **Add to Claude** — Go to Claude settings → Integrations → Add the connector URL
+4. **Set SERVER_URL** — Copy the generated domain URL (must include `https://`) and add it as the `SERVER_URL` env var. This triggers a redeploy.
+5. **Add to Claude** — Go to Claude settings → Integrations → Add the connector URL **with `/mcp` at the end** (e.g., `https://my-connector.up.railway.app/mcp`)
 6. **Test** — Ask Claude to use one of the connector's tools
 
 ## How to Create a New Connector
@@ -163,6 +164,20 @@ These issues have been hit and solved. Don't re-introduce them:
 6. **`SERVER_URL` not set** — OAuth callbacks redirect to `SERVER_URL`. If it's not set (or still `http://localhost:3000`), auth fails silently after deployment.
 
 7. **API version/endpoint compatibility** — Some APIs have endpoints that only work via gRPC, not REST (e.g., Google Ads `searchStream`). Always verify that endpoints work over plain HTTP/REST before building tools around them. API versions deprecate — use the latest stable version.
+
+8. **`SERVER_URL` must include `https://`** — Node's `new URL()` throws `ERR_INVALID_URL` if the protocol is missing. Always set `SERVER_URL` to the full URL including `https://`.
+
+9. **Read the actual API docs before writing code** — Don't rely on web search summaries of an API. They are frequently wrong about base URLs, auth headers, endpoint paths, and OAuth endpoints. Always find and read the official API documentation first. For WorkflowMax, web searches incorrectly said it used Xero's OAuth endpoints — it doesn't.
+
+10. **Add error response logging from day one** — The shared `apiRequest` swallows response bodies on 401 errors. When building a new connector, use a custom request wrapper that logs the full error response body. This is critical for diagnosing auth issues. Don't wait until something breaks to add logging.
+
+11. **Verify the exact API base URL and path prefix** — Many APIs version their endpoints with a path prefix (e.g., `/v2/clients` not `/clients`). Get this from the official API contract docs, not from guessing.
+
+12. **Auth headers: verify exact names** — Documentation may use formatting (underscores, camelCase) that doesn't match the actual header name the API expects. For example, WorkflowMax docs showed `account_id` but the API requires `account-id` (hyphen). The error response will tell you.
+
+13. **Some APIs require external account/org IDs** — Not all APIs embed the organisation ID in the JWT. If the JWT doesn't contain it, add a connector-specific env var (e.g., `WFM_ACCOUNT_ID`). Document where the user can find this value.
+
+14. **Claude's MCP connector URL needs `/mcp` suffix** — When adding a connector to Claude (Settings → Integrations), the URL must end with `/mcp` (e.g., `https://my-connector.up.railway.app/mcp`). Tell the user this explicitly.
 
 ## Commands
 
