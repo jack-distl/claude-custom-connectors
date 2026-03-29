@@ -19,8 +19,9 @@ function getAccountId(accessToken: string): string {
     }
     const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
 
-    // WorkflowMax JWT uses "aud" for the organisation/account ID
-    const accountId = payload.aud;
+    // Try both UUID claims — log which one we're using
+    const accountId = payload.sub;
+    console.log("[WFM] JWT aud:", payload.aud, "sub:", payload.sub);
     if (!accountId) {
       throw new Error(
         "No organisation ID (aud) found in token. JWT claims: " +
