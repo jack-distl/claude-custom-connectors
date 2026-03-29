@@ -65,6 +65,10 @@ function getAccountId(accessToken: string): string {
 
 function authHeaders(accessToken: string) {
   const accountId = getAccountId(accessToken);
+  // Log token shape to verify it's a JWT (3 dot-separated parts) not an opaque MCP token
+  const tokenParts = accessToken.split(".");
+  const tokenPreview = accessToken.substring(0, 20) + "..." + accessToken.substring(accessToken.length - 10);
+  console.log(`[WFM] Token: ${tokenPreview} (${tokenParts.length} parts, ${accessToken.length} chars)`);
   return {
     Authorization: `Bearer ${accessToken}`,
     "account-id": accountId,
