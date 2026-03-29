@@ -981,12 +981,15 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "create_job_task",
-    "Add a task to a job. Requires the global task template UUID and the job ID.",
+    "Add a task to a job. Requires the global task template UUID and the job ID. Staff are assigned as an array with UUID and allocated time.",
     {
       job_id: z.string().describe("Job UUID or job number to add the task to (required)"),
       task_uuid: z.string().describe("Global task template UUID to add to the job (required)"),
       estimated_minutes: z.number().optional().describe("Estimated time in minutes"),
-      assigned_staff_id: z.string().optional().describe("Staff member UUID to assign"),
+      staff: z.array(z.object({
+        uuid: z.string().describe("Staff member UUID"),
+        allocatedTime: z.number().optional().describe("Allocated time in minutes for this staff member"),
+      })).optional().describe("Staff members to assign to this task"),
       label: z.string().optional().describe("Label for the task assignment (e.g. 'Account Manager', 'SEO Specialist')"),
     },
     async (params, extra) => {
@@ -996,7 +999,7 @@ export function registerTools(server: McpServer) {
           taskId: params.task_uuid,
         };
         if (params.estimated_minutes !== undefined) data.estimatedMinutes = params.estimated_minutes;
-        if (params.assigned_staff_id !== undefined) data.assignedStaffId = params.assigned_staff_id;
+        if (params.staff !== undefined) data.staff = params.staff;
         if (params.label !== undefined) data.label = params.label;
         const result = await api.createJobTask(token, params.job_id, data);
         return toolResult(result);
@@ -1008,11 +1011,14 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "update_job_task",
-    "Update a task assignment within a job. This updates the job-level task, not the global task template. Provide only the fields you want to change.",
+    "Update a task assignment within a job. This updates the job-level task, not the global task template. Provide only the fields you want to change. Staff are assigned as an array with UUID and allocated time.",
     {
       task_id: z.string().describe("The job task UUID (from list_job_tasks)"),
       estimated_minutes: z.number().optional().describe("Estimated time in minutes"),
-      assigned_staff_id: z.string().optional().describe("Staff member UUID to assign"),
+      staff: z.array(z.object({
+        uuid: z.string().describe("Staff member UUID"),
+        allocatedTime: z.number().optional().describe("Allocated time in minutes for this staff member"),
+      })).optional().describe("Staff members to assign to this task"),
       label: z.string().optional().describe("Label for the task assignment"),
       status: z.string().optional().describe("Task status"),
     },
@@ -1021,7 +1027,7 @@ export function registerTools(server: McpServer) {
         const token = getAccessToken(extra);
         const data: Partial<api.WfmJobTask> = {};
         if (params.estimated_minutes !== undefined) data.estimatedMinutes = params.estimated_minutes;
-        if (params.assigned_staff_id !== undefined) data.assignedStaffId = params.assigned_staff_id;
+        if (params.staff !== undefined) data.staff = params.staff;
         if (params.label !== undefined) data.label = params.label;
         if (params.status !== undefined) data.status = params.status;
         const result = await api.updateJobTask(token, params.task_id, data);

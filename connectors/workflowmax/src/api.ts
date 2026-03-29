@@ -279,6 +279,11 @@ export interface WfmTask {
   assignedStaffId?: string;
 }
 
+export interface WfmJobTaskStaff {
+  uuid: string;
+  allocatedTime?: number;
+}
+
 export interface WfmJobTask {
   id: string;
   taskId?: string;
@@ -288,7 +293,7 @@ export interface WfmJobTask {
   estimatedMinutes?: number;
   actualMinutes?: number;
   status?: string;
-  assignedStaffId?: string;
+  staff?: WfmJobTaskStaff[];
 }
 
 export interface PaginatedResponse<T> {
