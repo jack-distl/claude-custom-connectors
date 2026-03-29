@@ -12,6 +12,12 @@ const BASE_URL = "https://api.workflowmax.com/v2";
  * Every API request must include this as the `account_id` header.
  */
 function getAccountId(accessToken: string): string {
+  // Use the WFM_ACCOUNT_ID env var if set, otherwise try to decode from JWT
+  if (process.env.WFM_ACCOUNT_ID) {
+    console.log("[WFM] Using account-id from env:", process.env.WFM_ACCOUNT_ID);
+    return process.env.WFM_ACCOUNT_ID;
+  }
+
   try {
     const parts = accessToken.split(".");
     if (parts.length !== 3) {
@@ -19,17 +25,32 @@ function getAccountId(accessToken: string): string {
     }
     const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
 
-    // Log both UUID candidates, use sub as account-id (aud returned 401)
-    console.log("[WFM] JWT aud:", payload.aud, "sub:", payload.sub);
-    const accountId = payload.sub;
-    if (!accountId) {
-      throw new Error(
-        "No organisation ID (aud) found in token. JWT claims: " +
-          Object.keys(payload).join(", ")
-      );
+    // Log full JWT payload for debugging
+    console.log("[WFM] JWT payload:", JSON.stringify(payload, null, 2));
+
+    // Try every plausible claim name
+    const accountId =
+      payload.org_id ||
+      payload.organisation_id ||
+      payload.organization_id ||
+      payload.account_id ||
+      payload.xero_tenant_id ||
+      payload.tenant_id ||
+      payload.wfm_org_id ||
+      payload.oid ||
+      payload.tid;
+
+    if (accountId) {
+      console.log("[WFM] Found account-id in JWT claim:", accountId);
+      return accountId;
     }
-    console.log("[WFM] Using account_id:", accountId);
-    return accountId;
+
+    console.warn("[WFM] No org ID in JWT. aud:", payload.aud, "sub:", payload.sub);
+    console.warn("[WFM] Set WFM_ACCOUNT_ID env var to your Organisation ID from WorkflowMax → Settings → Organisation Settings (visible in the URL).");
+    throw new Error(
+      "No organisation ID found in token and WFM_ACCOUNT_ID env var not set. " +
+        "JWT claims present: " + Object.keys(payload).join(", ")
+    );
   } catch (e) {
     if (e instanceof SyntaxError) {
       throw new Error("Failed to decode access token JWT payload.");
@@ -43,9 +64,11 @@ function getAccountId(accessToken: string): string {
 // ---------------------------------------------------------------------------
 
 function authHeaders(accessToken: string) {
+  const accountId = getAccountId(accessToken);
+  console.log("[WFM] Request headers: account-id=" + accountId);
   return {
     Authorization: `Bearer ${accessToken}`,
-    "account-id": getAccountId(accessToken),
+    "account-id": accountId,
   };
 }
 
@@ -60,18 +83,18 @@ async function diagnoseAuth(accessToken: string): Promise<void> {
   try {
     const meRes = await fetch(`${BASE_URL}/me`, { headers });
     const meBody = await meRes.text();
-    console.log(`[WFM] GET /v2/me → ${meRes.status}: ${meBody}`);
+    console.log(`[WFM] DIAG GET /v2/me → ${meRes.status}: ${meBody}`);
   } catch (e) {
-    console.error("[WFM] /v2/me failed:", e);
+    console.error("[WFM] DIAG /v2/me failed:", e);
   }
 
   // Try /v2/accounts with just bearer token
   try {
     const accRes = await fetch(`${BASE_URL}/accounts`, { headers });
     const accBody = await accRes.text();
-    console.log(`[WFM] GET /v2/accounts → ${accRes.status}: ${accBody}`);
+    console.log(`[WFM] DIAG GET /v2/accounts → ${accRes.status}: ${accBody}`);
   } catch (e) {
-    console.error("[WFM] /v2/accounts failed:", e);
+    console.error("[WFM] DIAG /v2/accounts failed:", e);
   }
 }
 
@@ -79,8 +102,6 @@ let diagnosed = false;
 
 /**
  * Make an API request to WorkflowMax with full error logging.
- * Unlike the shared wfmRequest, this logs the actual response body on errors
- * so we can diagnose auth issues.
  */
 async function wfmRequest<T = unknown>(
   url: string,
