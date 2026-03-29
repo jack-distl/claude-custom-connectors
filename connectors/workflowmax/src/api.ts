@@ -1,6 +1,6 @@
 import { ConnectorError } from "@custom-connectors/shared";
 
-const BASE_URL = "https://api.workflowmax.com";
+const BASE_URL = "https://api.workflowmax.com/v2";
 
 // ---------------------------------------------------------------------------
 // Organisation ID from JWT
@@ -19,9 +19,9 @@ function getAccountId(accessToken: string): string {
     }
     const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
 
-    // Try both UUID claims — log which one we're using
-    const accountId = payload.sub;
+    // Log both UUID candidates, use aud as account_id
     console.log("[WFM] JWT aud:", payload.aud, "sub:", payload.sub);
+    const accountId = payload.aud;
     if (!accountId) {
       throw new Error(
         "No organisation ID (aud) found in token. JWT claims: " +
@@ -239,7 +239,7 @@ export async function listClients(
   params: { query?: string; page?: number; pageSize?: number }
 ): Promise<PaginatedResponse<WfmClient>> {
   return wfmRequest<PaginatedResponse<WfmClient>>(
-    `${BASE_URL}/clients${qs({ query: params.query, page: params.page, pageSize: params.pageSize })}`,
+    `${BASE_URL}/clients${qs({ name: params.query, page: params.page, pageSize: params.pageSize })}`,
     { headers: authHeaders(accessToken) }
   );
 }
@@ -295,7 +295,7 @@ export async function listContacts(
   params: { clientId?: string; page?: number; pageSize?: number }
 ): Promise<PaginatedResponse<WfmContact>> {
   return wfmRequest<PaginatedResponse<WfmContact>>(
-    `${BASE_URL}/contacts${qs({ clientId: params.clientId, page: params.page, pageSize: params.pageSize })}`,
+    `${BASE_URL}/clients/contacts${qs({ clientId: params.clientId, page: params.page, pageSize: params.pageSize })}`,
     { headers: authHeaders(accessToken) }
   );
 }
@@ -304,7 +304,7 @@ export async function getContact(
   accessToken: string,
   contactId: string
 ): Promise<WfmContact> {
-  return wfmRequest<WfmContact>(`${BASE_URL}/contacts/${contactId}`, {
+  return wfmRequest<WfmContact>(`${BASE_URL}/clients/contacts/${contactId}`, {
     headers: authHeaders(accessToken),
   });
 }
@@ -313,7 +313,7 @@ export async function createContact(
   accessToken: string,
   data: Partial<WfmContact>
 ): Promise<WfmContact> {
-  return wfmRequest<WfmContact>(`${BASE_URL}/contacts`, {
+  return wfmRequest<WfmContact>(`${BASE_URL}/clients/contacts`, {
     method: "POST",
     headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -325,7 +325,7 @@ export async function updateContact(
   contactId: string,
   data: Partial<WfmContact>
 ): Promise<WfmContact> {
-  return wfmRequest<WfmContact>(`${BASE_URL}/contacts/${contactId}`, {
+  return wfmRequest<WfmContact>(`${BASE_URL}/clients/contacts/${contactId}`, {
     method: "PUT",
     headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -341,7 +341,7 @@ export async function listJobs(
   params: { status?: string; clientId?: string; page?: number; pageSize?: number }
 ): Promise<PaginatedResponse<WfmJob>> {
   return wfmRequest<PaginatedResponse<WfmJob>>(
-    `${BASE_URL}/jobs${qs({ status: params.status, clientId: params.clientId, page: params.page, pageSize: params.pageSize })}`,
+    `${BASE_URL}/jobs${qs({ status: params.status, client: params.clientId, page: params.page, pageSize: params.pageSize })}`,
     { headers: authHeaders(accessToken) }
   );
 }
@@ -397,7 +397,7 @@ export async function listTimesheets(
   params: { jobId?: string; staffId?: string; from?: string; to?: string; page?: number; pageSize?: number }
 ): Promise<PaginatedResponse<WfmTimesheet>> {
   return wfmRequest<PaginatedResponse<WfmTimesheet>>(
-    `${BASE_URL}/timesheets${qs({ jobId: params.jobId, staffId: params.staffId, from: params.from, to: params.to, page: params.page, pageSize: params.pageSize })}`,
+    `${BASE_URL}/timesheets${qs({ job: params.jobId, staff: params.staffId, from: params.from, to: params.to, page: params.page, pageSize: params.pageSize })}`,
     { headers: authHeaders(accessToken) }
   );
 }
@@ -453,7 +453,7 @@ export async function listInvoices(
   params: { status?: string; clientId?: string; from?: string; to?: string; page?: number; pageSize?: number }
 ): Promise<PaginatedResponse<WfmInvoice>> {
   return wfmRequest<PaginatedResponse<WfmInvoice>>(
-    `${BASE_URL}/invoices${qs({ status: params.status, clientId: params.clientId, from: params.from, to: params.to, page: params.page, pageSize: params.pageSize })}`,
+    `${BASE_URL}/invoices${qs({ status: params.status, client: params.clientId, from: params.from, to: params.to, page: params.page, pageSize: params.pageSize })}`,
     { headers: authHeaders(accessToken) }
   );
 }
@@ -476,7 +476,7 @@ export async function listQuotes(
   params: { clientId?: string; state?: string; page?: number; pageSize?: number }
 ): Promise<PaginatedResponse<WfmQuote>> {
   return wfmRequest<PaginatedResponse<WfmQuote>>(
-    `${BASE_URL}/quotes${qs({ clientId: params.clientId, state: params.state, page: params.page, pageSize: params.pageSize })}`,
+    `${BASE_URL}/quotes${qs({ client: params.clientId, state: params.state, page: params.page, pageSize: params.pageSize })}`,
     { headers: authHeaders(accessToken) }
   );
 }
