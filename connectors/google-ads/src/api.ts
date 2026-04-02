@@ -58,7 +58,7 @@ export async function searchGoogleAds(
   developerToken: string,
   customerId: string,
   query: string,
-  options: { loginCustomerId?: string; pageSize?: number; pageToken?: string } = {}
+  options: { loginCustomerId?: string; pageSize?: number; pageToken?: string; retries?: number } = {}
 ): Promise<GoogleAdsSearchResponse> {
   return apiRequest(
     `${GOOGLE_ADS_API_BASE}/customers/${customerId}/googleAds:search`,
@@ -73,6 +73,7 @@ export async function searchGoogleAds(
         ...(options.pageSize && { pageSize: options.pageSize }),
         ...(options.pageToken && { pageToken: options.pageToken }),
       },
+      retries: options.retries ?? 1,
     }
   );
 }

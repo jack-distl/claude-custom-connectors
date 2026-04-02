@@ -10,6 +10,20 @@ Full-access Google Ads API connector — read, create, update, and remove campai
 - **Authorize URL:** `https://accounts.google.com/o/oauth2/v2/auth`
 - **Additional:** Requires a Google Ads API developer token
 
+## API Access Level
+
+This connector works with **Basic access** (the default for approved developer tokens).
+
+- **Daily limit:** 15,000 operations/day across all users sharing the developer token
+- **All 32 tools** (read + write) are fully functional under Basic access
+- **Quota exhaustion:** Returns a clear `QUOTA_EXHAUSTED` error — no further calls should be made until the next day (resets at midnight Pacific Time)
+- **Standard access:** Removes the 15,000/day limit. Apply via [Google Ads API Center](https://ads.google.com/aw/apicenter) when needed
+
+### Quota Tips
+- Use dedicated read tools (`get_campaigns`, `get_ad_groups`, etc.) rather than `run_gaql_query` when possible
+- Set `limit` parameters to the minimum needed
+- Batch keywords into single `add_keywords` / `add_negative_keywords` calls (they accept arrays)
+
 ## Tools
 
 ### Read

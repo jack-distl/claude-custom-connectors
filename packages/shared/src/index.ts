@@ -9,6 +9,7 @@ export {
   ConnectorError,
   AuthError,
   RateLimitError,
+  QuotaExhaustedError,
   ApiError,
 } from "./errors.js";
 export type {

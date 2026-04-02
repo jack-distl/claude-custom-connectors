@@ -1,4 +1,4 @@
-import { ApiError, AuthError, RateLimitError } from "./errors.js";
+import { ApiError, AuthError, QuotaExhaustedError, RateLimitError } from "./errors.js";
 import type { ApiRequestOptions } from "./types.js";
 
 const DEFAULT_TIMEOUT = 30_000;
@@ -44,6 +44,12 @@ export async function apiRequest<T = unknown>(
       }
 
       if (response.status === 429) {
+        const errorText = await response.text();
+        if (errorText.includes("RESOURCE_EXHAUSTED") || errorText.includes("QuotaError")) {
+          throw new QuotaExhaustedError(
+            "Daily API quota exhausted (15,000 operations/day for Basic access). Try again tomorrow or apply for Standard access."
+          );
+        }
         const retryAfter = response.headers.get("retry-after");
         const retryMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : 5000;
         if (attempt < retries) {
@@ -63,6 +69,7 @@ export async function apiRequest<T = unknown>(
       if (
         error instanceof AuthError ||
         error instanceof RateLimitError ||
+        error instanceof QuotaExhaustedError ||
         error instanceof ApiError
       ) {
         throw error;
