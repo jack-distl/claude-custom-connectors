@@ -37,6 +37,11 @@ export interface MetaAd {
   creative?: Record<string, unknown>;
 }
 
+export interface MetaAction {
+  action_type: string;
+  value: string;
+}
+
 export interface MetaInsight {
   impressions: string;
   clicks: string;
@@ -45,6 +50,13 @@ export interface MetaInsight {
   cpm?: string;
   ctr?: string;
   reach?: string;
+  actions?: MetaAction[];
+  cost_per_action_type?: MetaAction[];
+  action_values?: MetaAction[];
+  conversions?: MetaAction[];
+  conversion_values?: MetaAction[];
+  purchase_roas?: MetaAction[];
+  website_purchase_roas?: MetaAction[];
   date_start: string;
   date_stop: string;
 }
@@ -129,7 +141,7 @@ export async function getInsights(
     level?: string;
   } = {}
 ): Promise<PaginatedResponse<MetaInsight>> {
-  const fields = "impressions,clicks,spend,cpc,cpm,ctr,reach";
+  const fields = "impressions,clicks,spend,cpc,cpm,ctr,reach,actions,cost_per_action_type,action_values,conversions,conversion_values,purchase_roas,website_purchase_roas";
   const params = new URLSearchParams({ fields });
 
   if (options.datePreset) {

@@ -120,7 +120,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_insights",
-    "Pull performance metrics (impressions, clicks, spend, CPC, CPM, CTR, reach) for a Meta ad account, campaign, ad set, or ad. Supports date ranges and breakdowns.",
+    "Pull performance metrics (impressions, clicks, spend, CPC, CPM, CTR, reach) and conversion data (actions, cost per action, conversion values, ROAS) for a Meta ad account, campaign, ad set, or ad. Supports date ranges and breakdowns.",
     {
       object_id: z
         .string()
