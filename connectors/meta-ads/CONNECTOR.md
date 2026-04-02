@@ -24,7 +24,7 @@ Lists ad sets within a specific campaign.
 Lists ads within a specific ad set.
 
 ### `get_insights`
-Pulls performance metrics (impressions, clicks, spend, CPC, CPM, CTR, reach) for any ad object. Supports date presets, custom date ranges, breakdowns (age, gender, country, placement), and aggregation levels.
+Pulls performance metrics (impressions, clicks, spend, CPC, CPM, CTR, reach) and conversion data (actions, cost per action type, action values, conversions, conversion values, purchase ROAS, website purchase ROAS) for any ad object. Supports date presets, custom date ranges, breakdowns (age, gender, country, placement), and aggregation levels.
 
 ### `get_audiences`
 Lists custom and lookalike audiences for an ad account.
