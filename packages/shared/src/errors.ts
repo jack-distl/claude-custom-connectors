@@ -42,6 +42,13 @@ export class RateLimitError extends ConnectorError {
   }
 }
 
+export class QuotaExhaustedError extends ConnectorError {
+  constructor(message: string) {
+    super(message, "QUOTA_EXHAUSTED", 429);
+    this.name = "QuotaExhaustedError";
+  }
+}
+
 export class ApiError extends ConnectorError {
   constructor(message: string, statusCode: number) {
     super(message, "API_ERROR", statusCode);

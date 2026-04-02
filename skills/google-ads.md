@@ -141,3 +141,4 @@ Removes a keyword from an ad group.
 - RSAs need 3-15 headlines (max 30 chars) and 2-4 descriptions (max 90 chars)
 - Write operations do not auto-retry to prevent duplicates
 - Present data in tables when showing metrics and always convert micros to readable currency
+- **API quota:** Basic access has a 15,000 operations/day limit. Be efficient — use specific read tools instead of `run_gaql_query` when possible, keep `limit` values low, and batch keywords in single calls. If you see a "quota exhausted" error, stop making API calls until the next day

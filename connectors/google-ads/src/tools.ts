@@ -368,17 +368,21 @@ function registerReadTools(server: McpServer) {
 
   server.tool(
     "run_gaql_query",
-    "Execute an arbitrary GAQL (Google Ads Query Language) query. Power-user tool for custom analysis and reporting beyond what other tools provide.",
+    "Execute an arbitrary GAQL query for custom analysis. Always include a LIMIT clause (recommended: 100 or less) to conserve API quota. Prefer the dedicated read tools when they cover your use case, as they are pre-optimized.",
     {
       customer_id: customerIdSchema,
       login_customer_id: loginCustomerIdSchema,
-      query: z.string().describe("Full GAQL query (e.g. 'SELECT campaign.name, metrics.clicks FROM campaign WHERE metrics.clicks > 100')"),
+      query: z.string().describe("Full GAQL query (e.g. 'SELECT campaign.name, metrics.clicks FROM campaign WHERE metrics.clicks > 100 LIMIT 50')"),
     },
     async ({ customer_id, query, login_customer_id }, extra) => {
       try {
         const access_token = getAccessToken(extra);
         const developer_token = getDeveloperToken();
-        const result = await searchGoogleAds(access_token, developer_token, customer_id, query, {
+        let safeQuery = query;
+        if (!/\bLIMIT\b/i.test(safeQuery)) {
+          safeQuery += " LIMIT 100";
+        }
+        const result = await searchGoogleAds(access_token, developer_token, customer_id, safeQuery, {
           loginCustomerId: login_customer_id,
         });
         return toolResult(result);
