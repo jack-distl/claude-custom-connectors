@@ -160,10 +160,20 @@ export interface WfmJob {
   status?: string;
   startDate?: string;
   dueDate?: string;
+  completedDate?: string;
   budget?: number;
   categoryId?: string;
   categoryName?: string;
   templateId?: string;
+  type?: string;
+  managerUUID?: string;
+  managerName?: string;
+  partnerUUID?: string;
+  partnerName?: string;
+  clientOrderNumber?: string;
+  dateCreatedUtc?: string;
+  dateModifiedUtc?: string;
+  webUrl?: string;
   assignedStaff?: string[];
 }
 
@@ -381,10 +391,10 @@ export async function updateContact(
 
 export async function listJobs(
   accessToken: string,
-  params: { status?: string; clientId?: string; page?: number; pageSize?: number }
+  params: { status?: string; clientId?: string; from?: string; to?: string; page?: number; pageSize?: number }
 ): Promise<PaginatedResponse<WfmJob>> {
   return wfmRequest<PaginatedResponse<WfmJob>>(
-    `${BASE_URL}/jobs${qs({ status: params.status, client: params.clientId, page: params.page, pageSize: params.pageSize })}`,
+    `${BASE_URL}/jobs${qs({ status: params.status, client: params.clientId, from: params.from, to: params.to, page: params.page, pageSize: params.pageSize })}`,
     { headers: authHeaders(accessToken) }
   );
 }

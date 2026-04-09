@@ -281,19 +281,68 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "list_jobs",
-    "List jobs in WorkflowMax. Optionally filter by status or client.",
+    "List jobs in WorkflowMax. Optionally filter by status, client, or date range. The 'from' and 'to' params are passed to the API as server-side filters. The 'completed_after' and 'completed_before' params filter locally by completedDate (requires fetching all matching pages).",
     {
       status: z.string().optional().describe("Filter by job status (e.g. 'Active', 'Completed', 'Planned')"),
       client_id: z.string().optional().describe("Filter jobs by client ID"),
-      page: z.number().optional().describe("Page number for pagination"),
+      from: z.string().optional().describe("Server-side date filter start (YYYYMMDD format)"),
+      to: z.string().optional().describe("Server-side date filter end (YYYYMMDD format)"),
+      completed_after: z.string().optional().describe("Client-side filter: only return jobs with completedDate after this date (YYYY-MM-DD). Auto-sets status to 'Completed' and fetches all pages."),
+      completed_before: z.string().optional().describe("Client-side filter: only return jobs with completedDate before this date (YYYY-MM-DD). Auto-sets status to 'Completed' and fetches all pages."),
+      page: z.number().optional().describe("Page number for pagination (ignored when using completed_after/completed_before)"),
       page_size: z.number().optional().describe("Number of results per page"),
     },
     async (params, extra) => {
       try {
         const token = getAccessToken(extra);
+        const needsCompletedFilter = params.completed_after || params.completed_before;
+
+        if (needsCompletedFilter) {
+          // Client-side filtering: fetch all completed jobs and filter by completedDate
+          const status = params.status || "Completed";
+          const allJobs: api.WfmJob[] = [];
+          let page = 1;
+          const pageSize = params.page_size || 100;
+          let hasMore = true;
+
+          while (hasMore) {
+            const result = await api.listJobs(token, {
+              status,
+              clientId: params.client_id,
+              from: params.from,
+              to: params.to,
+              page,
+              pageSize,
+            });
+            allJobs.push(...result.data);
+            hasMore = result.data.length === pageSize;
+            page++;
+          }
+
+          const afterDate = params.completed_after ? new Date(params.completed_after) : null;
+          const beforeDate = params.completed_before ? new Date(params.completed_before) : null;
+
+          const filtered = allJobs.filter((job) => {
+            if (!job.completedDate) return false;
+            const completed = new Date(job.completedDate);
+            if (afterDate && completed < afterDate) return false;
+            if (beforeDate && completed > beforeDate) return false;
+            return true;
+          });
+
+          return toolResult({
+            data: filtered,
+            totalCount: filtered.length,
+            note: `Fetched ${allJobs.length} ${status} jobs, ${filtered.length} matched date filter`,
+          });
+        }
+
+        // Standard pass-through to API
         const result = await api.listJobs(token, {
           status: params.status,
           clientId: params.client_id,
+          from: params.from,
+          to: params.to,
           page: params.page,
           pageSize: params.page_size,
         });
