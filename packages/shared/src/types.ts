@@ -11,6 +11,8 @@ export interface OAuthProxyConfig {
   clientSecret: string;
   /** OAuth scopes to request */
   scopes: string[];
+  /** Extra query params to append to the upstream authorize URL (e.g. Google's `access_type=offline`, `prompt=consent`). */
+  authorizeParams?: Record<string, string>;
 }
 
 export interface ConnectorConfig {

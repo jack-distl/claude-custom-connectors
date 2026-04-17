@@ -1,13 +1,14 @@
 # Google Ads Connector
 
 ## Overview
-Full-access Google Ads API connector — read, create, update, and remove campaigns, ad groups, ads, keywords, budgets, labels, and more. Supports GAQL queries for custom analysis.
+Read-only Google Ads API connector — query campaigns, ad groups, ads, keywords, budgets, bidding strategies, change history, audience segments, and geo targets. Supports arbitrary GAQL queries for custom analysis. No write operations are exposed.
 
 ## Authentication
-- **Type:** OAuth2 Authorization Code
-- **Scopes:** `https://www.googleapis.com/auth/adwords`
+- **Type:** OAuth2 Authorization Code (offline access for long-lived sessions)
+- **Scopes:** `https://www.googleapis.com/auth/adwords` (Google Ads has no read-only scope variant; read-only is enforced by exposing query tools only)
 - **Token URL:** `https://oauth2.googleapis.com/token`
 - **Authorize URL:** `https://accounts.google.com/o/oauth2/v2/auth`
+- **Authorize params:** `access_type=offline`, `prompt=consent` (so Google issues a refresh token; the connector then refreshes silently and the user does not need to re-authenticate every hour)
 - **Additional:** Requires a Google Ads API developer token
 
 ## API Access Level
@@ -15,14 +16,12 @@ Full-access Google Ads API connector — read, create, update, and remove campai
 This connector works with **Basic access** (the default for approved developer tokens).
 
 - **Daily limit:** 15,000 operations/day across all users sharing the developer token
-- **All 32 tools** (read + write) are fully functional under Basic access
 - **Quota exhaustion:** Returns a clear `QUOTA_EXHAUSTED` error — no further calls should be made until the next day (resets at midnight Pacific Time)
 - **Standard access:** Removes the 15,000/day limit. Apply via [Google Ads API Center](https://ads.google.com/aw/apicenter) when needed
 
 ### Quota Tips
-- Use dedicated read tools (`get_campaigns`, `get_ad_groups`, etc.) rather than `run_gaql_query` when possible
+- Use the dedicated read tools (`get_campaigns`, `get_ad_groups`, etc.) rather than `run_gaql_query` when possible
 - Set `limit` parameters to the minimum needed
-- Batch keywords into single `add_keywords` / `add_negative_keywords` calls (they accept arrays)
 
 ## Tools
 
@@ -44,46 +43,6 @@ This connector works with **Basic access** (the default for approved developer t
 | `get_geo_targets` | Search geographic targeting locations by name |
 | `run_gaql_query` | Execute arbitrary GAQL queries |
 
-### Create
-
-| Tool | Description |
-|------|-------------|
-| `create_campaign_budget` | Create a campaign budget (amount in micros) |
-| `create_campaign` | Create a campaign with channel type and bidding strategy |
-| `create_ad_group` | Create an ad group within a campaign |
-| `create_responsive_search_ad` | Create an RSA (3-15 headlines, 2-4 descriptions) |
-| `add_keywords` | Batch-add keywords to an ad group |
-| `add_negative_keywords` | Add negative keywords at campaign or ad group level |
-| `create_label` | Create a label for organizing entities |
-| `apply_label` | Apply a label to a campaign, ad group, or ad |
-
-### Update
-
-| Tool | Description |
-|------|-------------|
-| `update_campaign_budget` | Update budget amount or name |
-| `update_campaign` | Update campaign name, status, or bidding strategy |
-| `update_ad_group` | Update ad group name, status, or CPC bid |
-| `update_ad` | Pause or enable an ad |
-| `update_keyword` | Update keyword status or CPC bid |
-
-### Remove
-
-| Tool | Description |
-|------|-------------|
-| `remove_campaign` | Remove a campaign (permanent) |
-| `remove_ad_group` | Remove an ad group |
-| `remove_ad` | Remove an ad |
-| `remove_keyword` | Remove a keyword |
-
-## Write Operations
-
-All create/update/remove operations use the Google Ads API mutate pattern:
-- **No auto-retry** — mutations use `retries: 0` to prevent duplicate creates
-- **Resource names** — update and remove operations require full resource names (returned by read tools)
-- **Micros** — all monetary amounts are in micros (multiply dollars by 1,000,000)
-- **Campaigns default to PAUSED** — enable explicitly when ready to go live
-
 ## Environment Variables
 | Variable | Description |
 |----------|-------------|
@@ -95,4 +54,3 @@ All create/update/remove operations use the Google Ads API mutate pattern:
 ## API Reference
 - [Google Ads API](https://developers.google.com/google-ads/api/docs/start)
 - [GAQL Reference](https://developers.google.com/google-ads/api/docs/query/overview)
-- [Mutate Operations](https://developers.google.com/google-ads/api/docs/mutating/overview)

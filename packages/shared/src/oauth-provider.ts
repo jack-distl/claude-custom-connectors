@@ -56,6 +56,9 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
     const scopes = (params.scopes ?? this.config.scopes).join(" ");
     url.searchParams.set("scope", scopes);
     if (params.state) url.searchParams.set("state", params.state);
+    for (const [key, value] of Object.entries(this.config.authorizeParams ?? {})) {
+      if (!url.searchParams.has(key)) url.searchParams.set(key, value);
+    }
     res.redirect(url.toString());
   }
 

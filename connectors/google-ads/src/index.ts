@@ -14,6 +14,10 @@ const config = {
     clientId: process.env.GOOGLE_CLIENT_ID!,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
     scopes: ["https://www.googleapis.com/auth/adwords"],
+    authorizeParams: {
+      access_type: "offline",
+      prompt: "consent",
+    },
   },
 };
 
