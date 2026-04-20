@@ -4,13 +4,18 @@ import { ConnectorError } from "@custom-connectors/shared";
 import {
   getAdAccounts,
   getCampaigns,
+  getCampaign,
   getAdSets,
+  getAdSet,
   getAds,
+  getAd,
+  getAdCreative,
   getInsights,
   getAudiences,
   updateCampaign,
   updateAdSet,
   updateAd,
+  type MetaObject,
 } from "./api.js";
 
 function toolResult(data: unknown) {
@@ -37,6 +42,109 @@ function getAccessToken(extra: { authInfo?: { token?: string } }): string {
   return token;
 }
 
+// ===== Advantage+ derived helpers =====
+
+function isTruthyFlag(value: unknown): boolean {
+  if (value === 1 || value === true) return true;
+  if (typeof value === "string") {
+    const v = value.toLowerCase();
+    return v === "1" || v === "true" || v === "expansion_all";
+  }
+  return false;
+}
+
+function advantageCampaignBudgetEnabled(campaign: MetaObject | undefined): boolean {
+  if (!campaign) return false;
+  return Boolean(campaign.daily_budget) || Boolean(campaign.lifetime_budget);
+}
+
+function advantagePlusPlacementsOn(targeting: MetaObject | undefined): boolean {
+  if (!targeting) return false;
+  const placementKeys = [
+    "publisher_platforms",
+    "facebook_positions",
+    "instagram_positions",
+    "audience_network_positions",
+    "messenger_positions",
+    "device_platforms",
+  ];
+  return placementKeys.every((k) => {
+    const v = targeting[k];
+    return v === undefined || v === null || (Array.isArray(v) && v.length === 0);
+  });
+}
+
+function advantageDetailedTargetingOn(targeting: MetaObject | undefined): boolean {
+  if (!targeting) return false;
+  return isTruthyFlag(targeting.targeting_optimization);
+}
+
+function advantageLookalikeOn(targeting: MetaObject | undefined): boolean {
+  const relax = targeting?.targeting_relaxation_types as MetaObject | undefined;
+  return relax ? isTruthyFlag(relax.lookalike) : false;
+}
+
+function advantageCustomAudienceOn(targeting: MetaObject | undefined): boolean {
+  const relax = targeting?.targeting_relaxation_types as MetaObject | undefined;
+  return relax ? isTruthyFlag(relax.custom_audience) : false;
+}
+
+function advantagePlusAudienceOn(targeting: MetaObject | undefined): boolean {
+  const automation = targeting?.targeting_automation as MetaObject | undefined;
+  return automation ? isTruthyFlag(automation.advantage_audience) : false;
+}
+
+interface CreativeFeaturesSplit {
+  on: string[];
+  off: string[];
+}
+
+function creativeFeaturesSplit(creative: MetaObject | undefined): CreativeFeaturesSplit {
+  const on: string[] = [];
+  const off: string[] = [];
+  const dof = creative?.degrees_of_freedom_spec as MetaObject | undefined;
+  const spec = dof?.creative_features_spec as MetaObject | undefined;
+  if (!spec) return { on, off };
+  for (const [key, value] of Object.entries(spec)) {
+    const enroll = (value as MetaObject | undefined)?.enroll_status;
+    if (enroll === "OPT_IN") on.push(key);
+    else if (enroll === "OPT_OUT") off.push(key);
+  }
+  return { on, off };
+}
+
+function decorateCampaign(campaign: MetaObject): MetaObject {
+  return {
+    ...campaign,
+    advantage_campaign_budget_enabled: advantageCampaignBudgetEnabled(campaign),
+  };
+}
+
+function decorateAdSet(adSet: MetaObject): MetaObject {
+  const targeting = adSet.targeting as MetaObject | undefined;
+  return {
+    ...adSet,
+    advantage_plus_placements_on: advantagePlusPlacementsOn(targeting),
+    advantage_detailed_targeting_on: advantageDetailedTargetingOn(targeting),
+    advantage_detailed_targeting_raw: targeting?.targeting_optimization ?? null,
+    advantage_lookalike_on: advantageLookalikeOn(targeting),
+    advantage_custom_audience_on: advantageCustomAudienceOn(targeting),
+    advantage_plus_audience_on: advantagePlusAudienceOn(targeting),
+  };
+}
+
+function decorateAd(ad: MetaObject): MetaObject {
+  const creative = ad.creative as MetaObject | undefined;
+  const { on, off } = creativeFeaturesSplit(creative);
+  return {
+    ...ad,
+    advantage_creative_features_on: on,
+    advantage_creative_features_off: off,
+  };
+}
+
+// =====
+
 export function registerTools(server: McpServer) {
   server.tool(
     "get_ad_accounts",
@@ -57,7 +165,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_campaigns",
-    "List campaigns for a Meta ad account. Can filter by status (ACTIVE, PAUSED, etc). Returns campaign name, status, objective, and budget.",
+    "List campaigns for a Meta ad account. Returns raw campaign fields including Advantage+ signals (smart_promotion_type, advantage_state_info) plus a derived advantage_campaign_budget_enabled flag (CBO on when campaign-level daily/lifetime_budget is set). Filterable by status.",
     {
       ad_account_id: z
         .string()
@@ -75,7 +183,10 @@ export function registerTools(server: McpServer) {
           status,
           limit,
         });
-        return toolResult(result.data);
+        return toolResult({
+          data: result.data.map(decorateCampaign),
+          paging: result.paging,
+        });
       } catch (error) {
         return errorResult(error);
       }
@@ -84,7 +195,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_ad_sets",
-    "List ad sets within a Meta campaign. Returns ad set name, status, budget, and targeting info.",
+    "List ad sets within a Meta campaign. Returns raw ad set fields including the full targeting tree (placements, targeting_optimization, targeting_relaxation_types, targeting_automation) plus derived Advantage+ booleans: advantage_plus_placements_on, advantage_detailed_targeting_on, advantage_lookalike_on, advantage_custom_audience_on, advantage_plus_audience_on.",
     {
       campaign_id: z.string().describe("Campaign ID"),
       limit: z.number().optional().describe("Max results (default 25)"),
@@ -93,7 +204,10 @@ export function registerTools(server: McpServer) {
       try {
         const access_token = getAccessToken(extra);
         const result = await getAdSets(access_token, campaign_id, limit);
-        return toolResult(result.data);
+        return toolResult({
+          data: result.data.map(decorateAdSet),
+          paging: result.paging,
+        });
       } catch (error) {
         return errorResult(error);
       }
@@ -102,7 +216,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_ads",
-    "List ads within a Meta ad set. Returns ad name, status, and creative info.",
+    "List ads within a Meta ad set. Returns the full creative (object_story_spec, asset_feed_spec, degrees_of_freedom_spec.creative_features_spec) plus derived Advantage+ Creative helpers: advantage_creative_features_on (OPT_IN keys) and advantage_creative_features_off (OPT_OUT keys).",
     {
       ad_set_id: z.string().describe("Ad set ID"),
       limit: z.number().optional().describe("Max results (default 25)"),
@@ -111,7 +225,79 @@ export function registerTools(server: McpServer) {
       try {
         const access_token = getAccessToken(extra);
         const result = await getAds(access_token, ad_set_id, limit);
-        return toolResult(result.data);
+        return toolResult({
+          data: result.data.map(decorateAd),
+          paging: result.paging,
+        });
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  server.tool(
+    "get_ad_creative",
+    "Fetch a single Meta ad creative by ID. Returns the full creative object including object_story_spec, asset_feed_spec, and degrees_of_freedom_spec.creative_features_spec (Advantage+ Creative opt-in/opt-out per feature).",
+    {
+      creative_id: z.string().describe("Ad creative ID"),
+    },
+    async ({ creative_id }, extra) => {
+      try {
+        const access_token = getAccessToken(extra);
+        const creative = await getAdCreative(access_token, creative_id);
+        const { on, off } = creativeFeaturesSplit(creative);
+        return toolResult({
+          ...creative,
+          advantage_creative_features_on: on,
+          advantage_creative_features_off: off,
+        });
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  server.tool(
+    "get_ad_full_context",
+    "One-shot lookup for a Meta ad: returns the ad, its ad set, its parent campaign, and the full creative — plus a unified advantage_summary block covering campaign budget optimization, Advantage+ placements/targeting, Advantage+ audience, and Advantage+ Creative feature opt-ins. Use this to answer 'what's actually configured on this live ad' without three round trips.",
+    {
+      ad_id: z.string().describe("Ad ID"),
+    },
+    async ({ ad_id }, extra) => {
+      try {
+        const access_token = getAccessToken(extra);
+        const ad = await getAd(access_token, ad_id);
+        const adSetId = ad.adset_id as string | undefined;
+        const campaignId = ad.campaign_id as string | undefined;
+        const creative = ad.creative as MetaObject | undefined;
+
+        const [adSet, campaign] = await Promise.all([
+          adSetId ? getAdSet(access_token, adSetId) : Promise.resolve<MetaObject>({}),
+          campaignId ? getCampaign(access_token, campaignId) : Promise.resolve<MetaObject>({}),
+        ]);
+
+        const targeting = adSet.targeting as MetaObject | undefined;
+        const { on, off } = creativeFeaturesSplit(creative);
+
+        const advantage_summary = {
+          advantage_campaign_budget_enabled: advantageCampaignBudgetEnabled(campaign),
+          advantage_plus_placements_on: advantagePlusPlacementsOn(targeting),
+          advantage_detailed_targeting_on: advantageDetailedTargetingOn(targeting),
+          advantage_detailed_targeting_raw: targeting?.targeting_optimization ?? null,
+          advantage_lookalike_on: advantageLookalikeOn(targeting),
+          advantage_custom_audience_on: advantageCustomAudienceOn(targeting),
+          advantage_plus_audience_on: advantagePlusAudienceOn(targeting),
+          advantage_creative_features_on: on,
+          advantage_creative_features_off: off,
+        };
+
+        return toolResult({
+          ad: decorateAd(ad),
+          ad_set: decorateAdSet(adSet),
+          campaign: decorateCampaign(campaign),
+          creative: creative ?? null,
+          advantage_summary,
+        });
       } catch (error) {
         return errorResult(error);
       }
