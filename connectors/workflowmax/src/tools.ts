@@ -383,19 +383,31 @@ export function registerTools(server: McpServer) {
       budget: z.number().optional().describe("Job budget amount"),
       category_id: z.string().optional().describe("Job category ID"),
       template_id: z.string().optional().describe("Job template ID to use"),
+      priority: z.string().optional().describe('Job priority. Accepted values: "Normal", "High", "Low". Defaults to "Normal".'),
+      status_id: z.string().optional().describe("UUID of the job status (e.g. the UUID for 'Planned' or 'In Progress'). If omitted, the connector auto-fetches the first available status from the organisation."),
     },
     async (params, extra) => {
       try {
         const token = getAccessToken(extra);
+
+        let statusuuid = params.status_id;
+        if (!statusuuid) {
+          const statuses = await api.listJobStatuses(token);
+          const preferred = statuses.find(s => /planned|in.progress/i.test(s.name));
+          statusuuid = (preferred ?? statuses[0])?.id;
+        }
+
         const result = await api.createJob(token, {
-          name: params.name,
-          clientId: params.client_id,
+          jobname: params.name,
+          clientuuid: params.client_id,
           description: params.description,
           startDate: params.start_date,
           dueDate: params.due_date,
           budget: params.budget,
           categoryId: params.category_id,
           templateId: params.template_id,
+          priority: params.priority ?? "Normal",
+          statusuuid,
         });
         return toolResult(result);
       } catch (error) {
