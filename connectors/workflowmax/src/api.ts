@@ -158,6 +158,8 @@ export interface WfmJob {
   clientName?: string;
   state?: string;
   status?: string;
+  statusuuid?: string;
+  priority?: string;
   startDate?: string;
   dueDate?: string;
   completedDate?: string;
@@ -175,6 +177,24 @@ export interface WfmJob {
   dateModifiedUtc?: string;
   webUrl?: string;
   assignedStaff?: string[];
+}
+
+export interface WfmJobStatus {
+  id: string;
+  name: string;
+}
+
+export interface CreateJobRequest {
+  jobname: string;
+  clientuuid: string;
+  description?: string;
+  startDate?: string;
+  dueDate?: string;
+  budget?: number;
+  categoryId?: string;
+  templateId?: string;
+  priority?: string;
+  statusuuid?: string;
 }
 
 export interface WfmTimesheet {
@@ -410,9 +430,17 @@ export async function getJob(
   );
 }
 
+export async function listJobStatuses(
+  accessToken: string
+): Promise<WfmJobStatus[]> {
+  return wfmRequest<WfmJobStatus[]>(`${BASE_URL}/job-statuses`, {
+    headers: authHeaders(accessToken),
+  });
+}
+
 export async function createJob(
   accessToken: string,
-  data: Partial<WfmJob>
+  data: CreateJobRequest
 ): Promise<WfmJob> {
   return wfmRequest<WfmJob>(`${BASE_URL}/jobs`, {
     method: "POST",
