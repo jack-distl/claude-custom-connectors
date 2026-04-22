@@ -392,9 +392,13 @@ export function registerTools(server: McpServer) {
 
         let statusuuid = params.status_id;
         if (!statusuuid) {
-          const statuses = await api.listJobStatuses(token);
-          const preferred = statuses.find(s => /planned|in.progress/i.test(s.name));
-          statusuuid = (preferred ?? statuses[0])?.id;
+          try {
+            const statuses = await api.listJobStatuses(token);
+            const preferred = statuses.find(s => /planned|in.progress/i.test(s.name));
+            statusuuid = (preferred ?? statuses[0])?.id;
+          } catch (statusErr) {
+            console.warn("[WFM] Could not auto-fetch job statuses:", statusErr);
+          }
         }
 
         const result = await api.createJob(token, {
