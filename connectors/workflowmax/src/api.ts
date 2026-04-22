@@ -433,9 +433,11 @@ export async function getJob(
 export async function listJobStatuses(
   accessToken: string
 ): Promise<WfmJobStatus[]> {
-  return wfmRequest<WfmJobStatus[]>(`${BASE_URL}/job-statuses`, {
-    headers: authHeaders(accessToken),
-  });
+  const resp = await wfmRequest<PaginatedResponse<WfmJobStatus> | WfmJobStatus[]>(
+    `${BASE_URL}/job-status`,
+    { headers: authHeaders(accessToken) }
+  );
+  return Array.isArray(resp) ? resp : (resp.data ?? []);
 }
 
 export async function createJob(
