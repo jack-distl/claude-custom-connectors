@@ -191,10 +191,31 @@ export interface CreateJobRequest {
   startDate?: string;
   dueDate?: string;
   budget?: number;
-  categoryId?: string;
-  templateId?: string;
+  categoryuuid?: string;
+  templateuuid?: string;
   priority?: string;
   statusuuid?: string;
+}
+
+export interface UpdateJobRequest {
+  jobname?: string;
+  description?: string;
+  startDate?: string;
+  dueDate?: string;
+  budget?: number;
+  status?: string;
+  categoryuuid?: string;
+  priority?: string;
+  jobmanageruuid?: string;
+  clientmanageruuid?: string;
+  staff?: WfmJobTaskStaff[];
+}
+
+export interface CreateJobTaskRequest {
+  taskuuid: string;
+  estimatedMinutes?: number;
+  staff?: WfmJobTaskStaff[];
+  label?: string;
 }
 
 export interface WfmTimesheet {
@@ -208,6 +229,16 @@ export interface WfmTimesheet {
   billable?: boolean;
   start?: string;
   end?: string;
+}
+
+export interface CreateTimesheetRequest {
+  jobuuid: string;
+  staffuuid: string;
+  taskuuid?: string;
+  date: string;
+  minutes: number;
+  note?: string;
+  billable?: boolean;
 }
 
 export interface WfmInvoice {
@@ -245,6 +276,15 @@ export interface WfmLead {
   status?: string;
 }
 
+export interface CreateLeadRequest {
+  name: string;
+  description?: string;
+  clientuuid?: string;
+  categoryuuid?: string;
+  staffuuid?: string;
+  estimatedValue?: number;
+}
+
 export interface WfmStaff {
   id: string;
   name: string;
@@ -266,6 +306,17 @@ export interface WfmCost {
   supplierId?: string;
   quantity?: number;
   unitCost?: number;
+}
+
+export interface CreateCostRequest {
+  description: string;
+  date: string;
+  amount?: number;
+  quantity?: number;
+  unitCost?: number;
+  billable?: boolean;
+  note?: string;
+  supplieruuid?: string;
 }
 
 export interface WfmTask {
@@ -454,7 +505,7 @@ export async function createJob(
 export async function updateJob(
   accessToken: string,
   jobId: string,
-  data: Partial<WfmJob>
+  data: UpdateJobRequest
 ): Promise<WfmJob> {
   return wfmRequest<WfmJob>(`${BASE_URL}/jobs/${jobId}`, {
     method: "PUT",
@@ -498,7 +549,7 @@ export async function getTimesheet(
 
 export async function createTimesheet(
   accessToken: string,
-  data: Partial<WfmTimesheet>
+  data: CreateTimesheetRequest
 ): Promise<WfmTimesheet> {
   return wfmRequest<WfmTimesheet>(`${BASE_URL}/timesheets`, {
     method: "POST",
@@ -591,7 +642,7 @@ export async function listLeads(
 
 export async function createLead(
   accessToken: string,
-  data: Partial<WfmLead>
+  data: CreateLeadRequest
 ): Promise<WfmLead> {
   return wfmRequest<WfmLead>(`${BASE_URL}/leads`, {
     method: "POST",
@@ -640,7 +691,7 @@ export async function listCosts(
 export async function createCost(
   accessToken: string,
   jobId: string,
-  data: Partial<WfmCost>
+  data: CreateCostRequest
 ): Promise<WfmCost> {
   return wfmRequest<WfmCost>(`${BASE_URL}/jobs/${jobId}/costs`, {
     method: "POST",
@@ -747,7 +798,7 @@ export async function listJobTasks(
 export async function createJobTask(
   accessToken: string,
   jobId: string,
-  data: Partial<WfmJobTask>
+  data: CreateJobTaskRequest
 ): Promise<WfmJobTask> {
   return wfmRequest<WfmJobTask>(`${BASE_URL}/jobs/${jobId}/tasks`, {
     method: "POST",

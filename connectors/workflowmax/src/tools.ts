@@ -410,8 +410,8 @@ export function registerTools(server: McpServer) {
           startDate: params.start_date,
           dueDate: params.due_date,
           budget: params.budget,
-          categoryId: params.category_id,
-          templateId: params.template_id,
+          categoryuuid: params.category_id,
+          templateuuid: params.template_id,
           priority: params.priority ?? "Normal",
           statusuuid,
         });
@@ -433,19 +433,28 @@ export function registerTools(server: McpServer) {
       start_date: z.string().optional().describe("Start date (YYYY-MM-DD)"),
       due_date: z.string().optional().describe("Due date (YYYY-MM-DD)"),
       budget: z.number().optional().describe("Job budget amount"),
-      category_id: z.string().optional().describe("Job category ID"),
+      category_id: z.string().optional().describe("Job category UUID"),
+      job_manager_id: z.string().optional().describe("UUID of the staff member managing the job"),
+      client_manager_id: z.string().optional().describe("UUID of the staff member managing the client relationship"),
+      staff: z.array(z.object({
+        uuid: z.string().describe("Staff member UUID"),
+        allocatedTime: z.number().optional().describe("Allocated time in minutes"),
+      })).optional().describe("Staff members to assign to the job"),
     },
     async (params, extra) => {
       try {
         const token = getAccessToken(extra);
-        const data: Partial<api.WfmJob> = {};
-        if (params.name !== undefined) data.name = params.name;
+        const data: api.UpdateJobRequest = {};
+        if (params.name !== undefined) data.jobname = params.name;
         if (params.description !== undefined) data.description = params.description;
         if (params.status !== undefined) data.status = params.status;
         if (params.start_date !== undefined) data.startDate = params.start_date;
         if (params.due_date !== undefined) data.dueDate = params.due_date;
         if (params.budget !== undefined) data.budget = params.budget;
-        if (params.category_id !== undefined) data.categoryId = params.category_id;
+        if (params.category_id !== undefined) data.categoryuuid = params.category_id;
+        if (params.job_manager_id !== undefined) data.jobmanageruuid = params.job_manager_id;
+        if (params.client_manager_id !== undefined) data.clientmanageruuid = params.client_manager_id;
+        if (params.staff !== undefined) data.staff = params.staff;
         const result = await api.updateJob(token, params.job_id, data);
         return toolResult(result);
       } catch (error) {
@@ -537,9 +546,9 @@ export function registerTools(server: McpServer) {
       try {
         const token = getAccessToken(extra);
         const result = await api.createTimesheet(token, {
-          jobId: params.job_id,
-          staffId: params.staff_id,
-          taskId: params.task_id,
+          jobuuid: params.job_id,
+          staffuuid: params.staff_id,
+          taskuuid: params.task_id,
           date: params.date,
           minutes: params.minutes,
           note: params.note,
@@ -739,9 +748,9 @@ export function registerTools(server: McpServer) {
         const result = await api.createLead(token, {
           name: params.name,
           description: params.description,
-          clientId: params.client_id,
-          categoryId: params.category_id,
-          ownerStaffId: params.owner_staff_id,
+          clientuuid: params.client_id,
+          categoryuuid: params.category_id,
+          staffuuid: params.owner_staff_id,
           estimatedValue: params.estimated_value,
         });
         return toolResult(result);
@@ -845,7 +854,7 @@ export function registerTools(server: McpServer) {
           unitCost: params.unit_cost,
           billable: params.billable,
           note: params.note,
-          supplierId: params.supplier_id,
+          supplieruuid: params.supplier_id,
         });
         return toolResult(result);
       } catch (error) {
@@ -1062,8 +1071,8 @@ export function registerTools(server: McpServer) {
     async (params, extra) => {
       try {
         const token = getAccessToken(extra);
-        const data: Partial<api.WfmJobTask> = {
-          taskId: params.task_uuid,
+        const data: api.CreateJobTaskRequest = {
+          taskuuid: params.task_uuid,
         };
         if (params.estimated_minutes !== undefined) data.estimatedMinutes = params.estimated_minutes;
         if (params.staff !== undefined) data.staff = params.staff;
