@@ -390,6 +390,7 @@ export function registerTools(server: McpServer) {
       try {
         const token = getAccessToken(extra);
 
+        const ORG_DEFAULT_STATUS_UUID = "9bef861f-0d89-4151-88ff-99fc9767277d";
         let statusuuid = params.status_id;
         if (!statusuuid) {
           try {
@@ -397,8 +398,9 @@ export function registerTools(server: McpServer) {
             const preferred = statuses.find(s => /planned|in.progress/i.test(s.name));
             statusuuid = (preferred ?? statuses[0])?.id;
           } catch (statusErr) {
-            console.warn("[WFM] Could not auto-fetch job statuses:", statusErr);
+            console.warn("[WFM] Could not auto-fetch job statuses, using org default:", statusErr);
           }
+          statusuuid ??= ORG_DEFAULT_STATUS_UUID;
         }
 
         const result = await api.createJob(token, {
