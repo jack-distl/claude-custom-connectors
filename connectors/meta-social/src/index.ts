@@ -1,0 +1,28 @@
+import {
+  createConnectorServer,
+  startServer,
+} from "@custom-connectors/shared";
+import { registerTools } from "./tools.js";
+
+const config = {
+  name: "Meta Social",
+  version: "1.0.0",
+  oauth: {
+    serverUrl: process.env.SERVER_URL || "http://localhost:3000",
+    authorizeUrl: "https://www.facebook.com/v23.0/dialog/oauth",
+    tokenUrl: "https://graph.facebook.com/v23.0/oauth/access_token",
+    clientId: process.env.META_APP_ID!,
+    clientSecret: process.env.META_APP_SECRET!,
+    scopes: [
+      "pages_show_list",
+      "pages_read_engagement",
+      "read_insights",
+      "instagram_basic",
+      "instagram_manage_insights",
+    ],
+  },
+};
+
+const server = createConnectorServer(config);
+registerTools(server);
+startServer(server, config, registerTools);
