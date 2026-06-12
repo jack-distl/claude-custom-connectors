@@ -13,6 +13,16 @@ export interface OAuthProxyConfig {
   scopes: string[];
   /** Extra query params to append to the upstream authorize URL (e.g. Google's `access_type=offline`, `prompt=consent`). */
   authorizeParams?: Record<string, string>;
+  /**
+   * Facebook-style long-lived token upgrade. When true, the short-lived token
+   * from the authorization-code exchange is immediately re-exchanged for a
+   * long-lived (~60 day) token via `grant_type=fb_exchange_token`. The
+   * long-lived token is also returned as the refresh token so that, as the
+   * session nears expiry, the connector re-runs the exchange to extend it as
+   * far as the provider allows (Meta issues no real refresh token for user
+   * tokens, so ~60 days is the ceiling before a re-auth is needed).
+   */
+  longLivedTokenExchange?: boolean;
 }
 
 export interface ConnectorConfig {

@@ -15,6 +15,9 @@ const config = {
     clientId: process.env.META_APP_ID!,
     clientSecret: process.env.META_APP_SECRET!,
     scopes: ["ads_read", "ads_management"],
+    // Upgrade Meta's short-lived (~1-2h) user token to a long-lived (~60 day)
+    // token so the connection survives without frequent re-auth.
+    longLivedTokenExchange: true,
   },
 };
 

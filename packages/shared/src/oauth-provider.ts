@@ -108,6 +108,17 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
     if (redirectUri) params.set("redirect_uri", redirectUri);
 
     const data = await this.postToTokenEndpoint(params, "Token exchange");
+
+    // Upgrade the short-lived token to a long-lived (~60 day) one so the
+    // session survives far past the default ~1-2h, then hand the long-lived
+    // token back as the refresh token to enable best-effort extension.
+    if (this.config.longLivedTokenExchange) {
+      const longLived = await this.exchangeForLongLivedToken(
+        data.access_token as string
+      );
+      return this.toOAuthTokens(longLived, true);
+    }
+
     return this.toOAuthTokens(data);
   }
 
@@ -116,6 +127,14 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
     refreshToken: string,
     scopes?: string[]
   ): Promise<OAuthTokens> {
+    // Facebook user tokens have no real refresh token; the long-lived token
+    // itself was handed back as the "refresh token". Re-run the long-lived
+    // exchange against it to mint a fresh one and extend the session.
+    if (this.config.longLivedTokenExchange) {
+      const data = await this.exchangeForLongLivedToken(refreshToken);
+      return this.toOAuthTokens(data, true);
+    }
+
     const params = new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: refreshToken,
@@ -126,6 +145,22 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
 
     const data = await this.postToTokenEndpoint(params, "Token refresh");
     return this.toOAuthTokens(data);
+  }
+
+  /**
+   * Exchange a Facebook short-lived (or existing long-lived) user token for a
+   * long-lived (~60 day) one via `grant_type=fb_exchange_token`.
+   */
+  private async exchangeForLongLivedToken(
+    token: string
+  ): Promise<Record<string, unknown>> {
+    const params = new URLSearchParams({
+      grant_type: "fb_exchange_token",
+      client_id: this.config.clientId,
+      client_secret: this.config.clientSecret,
+      fb_exchange_token: token,
+    });
+    return this.postToTokenEndpoint(params, "Long-lived token exchange");
   }
 
   /**
@@ -178,16 +213,24 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
     return data;
   }
 
-  private toOAuthTokens(data: Record<string, unknown>): OAuthTokens {
+  private toOAuthTokens(
+    data: Record<string, unknown>,
+    selfRefresh = false
+  ): OAuthTokens {
+    const accessToken = data.access_token as string;
+    const refreshToken =
+      typeof data.refresh_token === "string"
+        ? data.refresh_token
+        : selfRefresh
+          ? accessToken
+          : undefined;
     return {
-      access_token: data.access_token as string,
+      access_token: accessToken,
       token_type: "bearer",
       ...(data.expires_in != null && {
         expires_in: Number(data.expires_in),
       }),
-      ...(typeof data.refresh_token === "string" && {
-        refresh_token: data.refresh_token,
-      }),
+      ...(refreshToken != null && { refresh_token: refreshToken }),
     };
   }
 
