@@ -12,6 +12,9 @@ import {
   getAdCreative,
   getInsights,
   getAudiences,
+  getPagePostDestination,
+  getLeadForms,
+  getFormLeads,
   updateCampaign,
   updateAdSet,
   updateAd,
@@ -143,6 +146,136 @@ function decorateAd(ad: MetaObject): MetaObject {
   };
 }
 
+// ===== Lead-destination resolution =====
+// Surfaces the destination link and any lead_gen_form_id on a creative,
+// whether the spec is inline or the ad is built from an existing page post.
+
+interface LeadDestination {
+  lead_gen_form_id: string | null;
+  link: string | null;
+  call_to_action_type: string | null;
+  source: "inline_object_story_spec" | "asset_feed_spec" | "page_post" | "none";
+  resolution_error?: string;
+}
+
+function extractInlineDestination(
+  creative: MetaObject | undefined
+): LeadDestination | null {
+  const spec = creative?.object_story_spec as MetaObject | undefined;
+  if (spec) {
+    const data =
+      (spec.link_data as MetaObject | undefined) ??
+      (spec.video_data as MetaObject | undefined) ??
+      (spec.photo_data as MetaObject | undefined);
+    const cta = data?.call_to_action as MetaObject | undefined;
+    const value = cta?.value as MetaObject | undefined;
+
+    // Carousels carry the CTA/link per card under child_attachments.
+    let childForm: string | undefined;
+    let childLink: string | undefined;
+    const children = (data?.child_attachments as MetaObject[] | undefined) ?? [];
+    for (const child of children) {
+      const childValue = (child.call_to_action as MetaObject | undefined)
+        ?.value as MetaObject | undefined;
+      childForm = childForm ?? (childValue?.lead_gen_form_id as string | undefined);
+      childLink =
+        childLink ??
+        (childValue?.link as string | undefined) ??
+        (child.link as string | undefined);
+    }
+
+    const formId =
+      (value?.lead_gen_form_id as string | undefined) ?? childForm;
+    const link =
+      (value?.link as string | undefined) ??
+      (data?.link as string | undefined) ??
+      childLink;
+
+    if (formId || link || cta) {
+      return {
+        lead_gen_form_id: formId ?? null,
+        link: link ?? null,
+        call_to_action_type: (cta?.type as string | undefined) ?? null,
+        source: "inline_object_story_spec",
+      };
+    }
+  }
+
+  // Advantage+ / dynamic creatives keep their links in asset_feed_spec
+  // (no lead_gen_form_id available there).
+  const feed = creative?.asset_feed_spec as MetaObject | undefined;
+  if (feed) {
+    const linkUrls = (feed.link_urls as MetaObject[] | undefined) ?? [];
+    const link = linkUrls[0]?.website_url as string | undefined;
+    const ctas = (feed.call_to_action_types as string[] | undefined) ?? [];
+    if (link || ctas.length) {
+      return {
+        lead_gen_form_id: null,
+        link: link ?? null,
+        call_to_action_type: ctas[0] ?? null,
+        source: "asset_feed_spec",
+      };
+    }
+  }
+
+  return null;
+}
+
+async function resolveLeadDestination(
+  token: string,
+  creative: MetaObject | undefined
+): Promise<LeadDestination> {
+  const inline = extractInlineDestination(creative);
+  if (inline && (inline.lead_gen_form_id || inline.link)) {
+    return inline;
+  }
+
+  const storyId =
+    (creative?.effective_object_story_id as string | undefined) ??
+    (creative?.object_story_id as string | undefined);
+  if (storyId) {
+    const post = await getPagePostDestination(token, storyId);
+    if (post.resolution_error) {
+      return {
+        lead_gen_form_id: null,
+        link: null,
+        call_to_action_type: null,
+        source: "page_post",
+        resolution_error: post.resolution_error as string,
+      };
+    }
+    const cta = post.call_to_action as MetaObject | undefined;
+    const value = cta?.value as MetaObject | undefined;
+    const attachment = (
+      (post.attachments as MetaObject | undefined)?.data as
+        | MetaObject[]
+        | undefined
+    )?.[0];
+    const link =
+      (value?.link as string | undefined) ??
+      (attachment?.unshimmed_url as string | undefined) ??
+      ((attachment?.target as MetaObject | undefined)?.url as string | undefined);
+    return {
+      lead_gen_form_id: (value?.lead_gen_form_id as string | undefined) ?? null,
+      link: link ?? null,
+      call_to_action_type:
+        (cta?.type as string | undefined) ??
+        (attachment?.call_to_action_type as string | undefined) ??
+        null,
+      source: "page_post",
+    };
+  }
+
+  return (
+    inline ?? {
+      lead_gen_form_id: null,
+      link: null,
+      call_to_action_type: null,
+      source: "none",
+    }
+  );
+}
+
 // =====
 
 export function registerTools(server: McpServer) {
@@ -175,13 +308,23 @@ export function registerTools(server: McpServer) {
         .optional()
         .describe("Filter by status: ACTIVE, PAUSED, DELETED, ARCHIVED"),
       limit: z.number().optional().describe("Max results (default 25)"),
+      after: z
+        .string()
+        .optional()
+        .describe("Pagination cursor from a previous response's paging.cursors.after"),
+      fields: z
+        .array(z.string())
+        .optional()
+        .describe("Extra Graph API fields to request, appended to the defaults"),
     },
-    async ({ ad_account_id, status, limit }, extra) => {
+    async ({ ad_account_id, status, limit, after, fields }, extra) => {
       try {
         const access_token = getAccessToken(extra);
         const result = await getCampaigns(access_token, ad_account_id, {
           status,
           limit,
+          after,
+          fields,
         });
         return toolResult({
           data: result.data.map(decorateCampaign),
@@ -195,15 +338,27 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_ad_sets",
-    "List ad sets within a Meta campaign. Returns raw ad set fields including the full targeting tree (placements, targeting_optimization, targeting_relaxation_types, targeting_automation) plus derived Advantage+ booleans: advantage_plus_placements_on, advantage_detailed_targeting_on, advantage_lookalike_on, advantage_custom_audience_on, advantage_plus_audience_on.",
+    "List ad sets within a Meta campaign. Returns raw ad set fields including destination_type (the conversion location: WEBSITE / ON_AD / an instant-form value — the deciding flag between 'Website', 'Instant forms', and 'Website and instant forms'), the full promoted_object, the full targeting tree (placements, targeting_optimization, targeting_relaxation_types, targeting_automation), plus derived Advantage+ booleans: advantage_plus_placements_on, advantage_detailed_targeting_on, advantage_lookalike_on, advantage_custom_audience_on, advantage_plus_audience_on.",
     {
       campaign_id: z.string().describe("Campaign ID"),
       limit: z.number().optional().describe("Max results (default 25)"),
+      after: z
+        .string()
+        .optional()
+        .describe("Pagination cursor from a previous response's paging.cursors.after"),
+      fields: z
+        .array(z.string())
+        .optional()
+        .describe("Extra Graph API fields to request, appended to the defaults"),
     },
-    async ({ campaign_id, limit }, extra) => {
+    async ({ campaign_id, limit, after, fields }, extra) => {
       try {
         const access_token = getAccessToken(extra);
-        const result = await getAdSets(access_token, campaign_id, limit);
+        const result = await getAdSets(access_token, campaign_id, {
+          limit,
+          after,
+          fields,
+        });
         return toolResult({
           data: result.data.map(decorateAdSet),
           paging: result.paging,
@@ -216,17 +371,47 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_ads",
-    "List ads within a Meta ad set. Returns the full creative (object_story_spec, asset_feed_spec, degrees_of_freedom_spec.creative_features_spec) plus derived Advantage+ Creative helpers: advantage_creative_features_on (OPT_IN keys) and advantage_creative_features_off (OPT_OUT keys).",
+    "List ads within a Meta ad set. Returns the full creative (object_story_spec, asset_feed_spec, degrees_of_freedom_spec.creative_features_spec) plus derived Advantage+ Creative helpers: advantage_creative_features_on (OPT_IN keys) and advantage_creative_features_off (OPT_OUT keys). Set resolve_destination=true to also attach a lead_destination block (link + lead_gen_form_id) per ad, resolving page-post-backed creatives via the underlying post (adds extra Graph calls per ad).",
     {
       ad_set_id: z.string().describe("Ad set ID"),
       limit: z.number().optional().describe("Max results (default 25)"),
+      after: z
+        .string()
+        .optional()
+        .describe("Pagination cursor from a previous response's paging.cursors.after"),
+      fields: z
+        .array(z.string())
+        .optional()
+        .describe("Extra Graph API fields to request, appended to the defaults"),
+      resolve_destination: z
+        .boolean()
+        .optional()
+        .describe(
+          "When true, attach a lead_destination block (link + lead_gen_form_id) to each ad, resolving page-post-backed creatives. Adds latency proportional to the number of ads."
+        ),
     },
-    async ({ ad_set_id, limit }, extra) => {
+    async ({ ad_set_id, limit, after, fields, resolve_destination }, extra) => {
       try {
         const access_token = getAccessToken(extra);
-        const result = await getAds(access_token, ad_set_id, limit);
+        const result = await getAds(access_token, ad_set_id, {
+          limit,
+          after,
+          fields,
+        });
+        let data = result.data.map(decorateAd);
+        if (resolve_destination) {
+          data = await Promise.all(
+            data.map(async (ad) => ({
+              ...ad,
+              lead_destination: await resolveLeadDestination(
+                access_token,
+                ad.creative as MetaObject | undefined
+              ),
+            }))
+          );
+        }
         return toolResult({
-          data: result.data.map(decorateAd),
+          data,
           paging: result.paging,
         });
       } catch (error) {
@@ -237,7 +422,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_ad_creative",
-    "Fetch a single Meta ad creative by ID. Returns the full creative object including object_story_spec, asset_feed_spec, and degrees_of_freedom_spec.creative_features_spec (Advantage+ Creative opt-in/opt-out per feature).",
+    "Fetch a single Meta ad creative by ID. Returns the full creative object including object_story_spec, asset_feed_spec, and degrees_of_freedom_spec.creative_features_spec (Advantage+ Creative opt-in/opt-out per feature), plus a lead_destination block (link + lead_gen_form_id) resolved from the inline spec or, for page-post-backed creatives, the underlying post.",
     {
       creative_id: z.string().describe("Ad creative ID"),
     },
@@ -246,10 +431,15 @@ export function registerTools(server: McpServer) {
         const access_token = getAccessToken(extra);
         const creative = await getAdCreative(access_token, creative_id);
         const { on, off } = creativeFeaturesSplit(creative);
+        const lead_destination = await resolveLeadDestination(
+          access_token,
+          creative
+        );
         return toolResult({
           ...creative,
           advantage_creative_features_on: on,
           advantage_creative_features_off: off,
+          lead_destination,
         });
       } catch (error) {
         return errorResult(error);
@@ -259,7 +449,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_ad_full_context",
-    "One-shot lookup for a Meta ad: returns the ad, its ad set, its parent campaign, and the full creative — plus a unified advantage_summary block covering campaign budget optimization, Advantage+ placements/targeting, Advantage+ audience, and Advantage+ Creative feature opt-ins. Use this to answer 'what's actually configured on this live ad' without three round trips.",
+    "One-shot lookup for a Meta ad: returns the ad, its ad set (including destination_type — the conversion location), its parent campaign, and the full creative — plus a lead_destination block (link + lead_gen_form_id, resolved even for page-post-backed creatives) and a unified advantage_summary block covering campaign budget optimization, Advantage+ placements/targeting, Advantage+ audience, and Advantage+ Creative feature opt-ins. Use this to answer 'what's actually configured on this live ad' without multiple round trips.",
     {
       ad_id: z.string().describe("Ad ID"),
     },
@@ -278,6 +468,10 @@ export function registerTools(server: McpServer) {
 
         const targeting = adSet.targeting as MetaObject | undefined;
         const { on, off } = creativeFeaturesSplit(creative);
+        const lead_destination = await resolveLeadDestination(
+          access_token,
+          creative
+        );
 
         const advantage_summary = {
           advantage_campaign_budget_enabled: advantageCampaignBudgetEnabled(campaign),
@@ -296,6 +490,7 @@ export function registerTools(server: McpServer) {
           ad_set: decorateAdSet(adSet),
           campaign: decorateCampaign(campaign),
           creative: creative ?? null,
+          lead_destination,
           advantage_summary,
         });
       } catch (error) {
@@ -306,7 +501,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_insights",
-    "Pull performance metrics (impressions, clicks, spend, CPC, CPM, CTR, reach) and conversion data (actions, cost per action, conversion values, ROAS) for a Meta ad account, campaign, ad set, or ad. Supports date ranges and breakdowns.",
+    "Pull performance metrics (impressions, clicks, spend, CPC, CPM, CTR, reach) and conversion data (actions, cost per action, conversion values, ROAS) for a Meta ad account, campaign, ad set, or ad. Each row also carries entity identifiers (campaign_id/campaign_name, adset_id/adset_name, ad_id/ad_name) based on the requested level, so a result can be attributed to a specific entity. Supports date ranges, breakdowns, and attribution windows.",
     {
       object_id: z
         .string()
@@ -331,12 +526,22 @@ export function registerTools(server: McpServer) {
         .array(z.string())
         .optional()
         .describe(
-          "Breakdowns: age, gender, country, placement, device_platform"
+          "Breakdowns: age, gender, country, placement, device_platform, action_type"
         ),
       level: z
         .string()
         .optional()
         .describe("Aggregation level: account, campaign, adset, ad"),
+      action_attribution_windows: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Attribution windows, e.g. 1d_view, 7d_click, 1d_click. Controls how actions are attributed."
+        ),
+      fields: z
+        .array(z.string())
+        .optional()
+        .describe("Extra Graph API insight fields to request, appended to the defaults"),
     },
     async ({
       object_id,
@@ -345,6 +550,8 @@ export function registerTools(server: McpServer) {
       until,
       breakdowns,
       level,
+      action_attribution_windows,
+      fields,
     }, extra) => {
       try {
         const access_token = getAccessToken(extra);
@@ -355,6 +562,8 @@ export function registerTools(server: McpServer) {
           timeRange,
           breakdowns,
           level,
+          actionAttributionWindows: action_attribution_windows,
+          fields,
         });
         return toolResult(result.data);
       } catch (error) {
@@ -377,6 +586,79 @@ export function registerTools(server: McpServer) {
         const access_token = getAccessToken(extra);
         const result = await getAudiences(access_token, ad_account_id, limit);
         return toolResult(result.data);
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  server.tool(
+    "get_lead_forms",
+    "List the instant / lead-gen forms on a Facebook Page, including any auto-created by Meta, with their status and lead counts. Returns id, name, status, created_time, leads_count, expired_leads_count, locale, and questions. Requires the user to have a role on the Page (uses a derived Page access token).",
+    {
+      page_id: z.string().describe("Facebook Page ID that owns the forms"),
+      limit: z.number().optional().describe("Max results (default 25)"),
+      after: z
+        .string()
+        .optional()
+        .describe("Pagination cursor from a previous response's paging.cursors.after"),
+      fields: z
+        .array(z.string())
+        .optional()
+        .describe("Extra Graph API fields to request, appended to the defaults"),
+    },
+    async ({ page_id, limit, after, fields }, extra) => {
+      try {
+        const access_token = getAccessToken(extra);
+        const result = await getLeadForms(access_token, page_id, {
+          limit,
+          after,
+          fields,
+        });
+        return toolResult({
+          data: result.data,
+          paging: result.paging,
+        });
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  server.tool(
+    "get_form_leads",
+    "Retrieve the leads collected by a lead-gen / instant form. On-Meta form leads never hit the website or pixel, so they may sit uncollected in Meta — this pulls them so they can be pushed to a CRM. Returns field_data, created_time, ad_id, form_id, and campaign_id per lead, paginated. Requires the user to have a role on the owning Page (uses a derived Page access token).",
+    {
+      leadgen_form_id: z.string().describe("Lead-gen form ID"),
+      page_id: z
+        .string()
+        .optional()
+        .describe(
+          "Owning Page ID. Optional — if omitted it is resolved from the form. Pass it to skip a lookup or when form metadata is restricted."
+        ),
+      limit: z.number().optional().describe("Max results (default 25)"),
+      after: z
+        .string()
+        .optional()
+        .describe("Pagination cursor from a previous response's paging.cursors.after"),
+      fields: z
+        .array(z.string())
+        .optional()
+        .describe("Extra Graph API fields to request, appended to the defaults"),
+    },
+    async ({ leadgen_form_id, page_id, limit, after, fields }, extra) => {
+      try {
+        const access_token = getAccessToken(extra);
+        const result = await getFormLeads(access_token, leadgen_form_id, {
+          pageId: page_id,
+          limit,
+          after,
+          fields,
+        });
+        return toolResult({
+          data: result.data,
+          paging: result.paging,
+        });
       } catch (error) {
         return errorResult(error);
       }
