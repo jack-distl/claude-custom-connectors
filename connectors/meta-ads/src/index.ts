@@ -22,7 +22,6 @@ const config = {
       "pages_show_list",
       "pages_read_engagement",
       "pages_manage_ads",
-      "pages_manage_leads",
       "leads_retrieval",
     ],
     // Upgrade Meta's short-lived (~1-2h) user token to a long-lived (~60 day)

@@ -5,14 +5,14 @@ Connects to the Meta (Facebook) Marketing API to read and manage ad account data
 
 ## Authentication
 - **Type:** OAuth2 Authorization Code
-- **Scopes:** `ads_read`, `ads_management`, `pages_show_list`, `pages_read_engagement`, `pages_manage_ads`, `pages_manage_leads`, `leads_retrieval`
+- **Scopes:** `ads_read`, `ads_management`, `pages_show_list`, `pages_read_engagement`, `pages_manage_ads`, `leads_retrieval`
 - **Graph API version:** `v23.0`
 - **Token URL:** `https://graph.facebook.com/v23.0/oauth/access_token`
 - **Authorize URL:** `https://www.facebook.com/v23.0/dialog/oauth`
 
-> **Re-auth required:** the Page/leadgen scopes (`pages_show_list`, `pages_read_engagement`, `pages_manage_ads`, `pages_manage_leads`, `leads_retrieval`) were added to support `get_lead_forms`, `get_form_leads`, and page-post destination resolution. Any user connected before this change must **reconnect** to grant them.
+> **Re-auth required:** the Page/leadgen scopes (`pages_show_list`, `pages_read_engagement`, `pages_manage_ads`, `leads_retrieval`) were added to support `get_lead_forms`, `get_form_leads`, and page-post destination resolution. Any user connected before this change must **reconnect** to grant them.
 >
-> **App Review:** `leads_retrieval` and `pages_manage_leads` typically require Meta **App Review (Advanced Access)** before they work for users who are not admins/developers of the app. The leadgen tools will fail with a permissions error until that is granted.
+> **App Review:** `leads_retrieval` typically requires Meta **App Review (Advanced Access)** before it works for users who are not admins/developers of the app. The leadgen tools will fail with a permissions error until that is granted. The Page token holder must also have a lead-access (MANAGE) role on the Page.
 >
 > **Page access tokens:** the leadgen edges and a page post's `call_to_action` require a *Page* access token, not the user token. The connector derives it automatically from the user token via `/me/accounts`, so the authenticated user must have a role on the relevant Page.
 
