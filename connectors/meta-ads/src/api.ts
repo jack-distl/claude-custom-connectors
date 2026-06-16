@@ -32,6 +32,14 @@ export interface MetaInsight {
   conversion_values?: MetaAction[];
   purchase_roas?: MetaAction[];
   website_purchase_roas?: MetaAction[];
+  // Entity identifiers — returned per row based on the requested `level`,
+  // so a result can be attributed to a specific campaign / ad set / ad.
+  campaign_id?: string;
+  campaign_name?: string;
+  adset_id?: string;
+  adset_name?: string;
+  ad_id?: string;
+  ad_name?: string;
   date_start: string;
   date_stop: string;
 }
@@ -50,6 +58,53 @@ interface MetaUpdateResponse {
 
 function authHeaders(accessToken: string) {
   return { Authorization: `Bearer ${accessToken}` };
+}
+
+/**
+ * Append caller-supplied fields to a curated default field string,
+ * de-duplicating by top-level field name (ignores nested {...} expansions).
+ */
+function mergeFields(defaults: string, extra?: string[]): string {
+  if (!extra?.length) return defaults;
+  const seen = new Set(defaults.split(",").map((f) => f.split("{")[0].trim()));
+  const merged = [defaults];
+  for (const field of extra) {
+    const key = field.split("{")[0].trim();
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      merged.push(field);
+    }
+  }
+  return merged.join(",");
+}
+
+/**
+ * Exchange the user token for a Page access token. Leadgen edges
+ * (leadgen_forms, leads) and a page post's call_to_action require a
+ * Page token, not the user token. Mirrors meta-social's helper.
+ */
+async function getPageToken(userToken: string, pageId: string): Promise<string> {
+  const params = new URLSearchParams({ fields: "id,access_token", limit: "100" });
+  const response = await metaRequest<
+    PaginatedResponse<{ id: string; access_token: string }>
+  >(`${GRAPH_API_BASE}/me/accounts?${params}`, {
+    headers: authHeaders(userToken),
+  });
+  const page = response.data.find((p) => p.id === pageId);
+  if (!page) {
+    throw new ConnectorError(
+      `No access to page ${pageId}. The authenticated user must have a role on this Page (check pages_show_list / pages_read_engagement scopes).`,
+      "NOT_FOUND",
+      404
+    );
+  }
+  return page.access_token;
+}
+
+// Extract the page ID from a post / story ID (format: {pageId}_{postId}).
+function pageIdFromPostId(postId: string): string | null {
+  const parts = postId.split("_");
+  return parts.length >= 2 ? parts[0] : null;
 }
 
 /**
@@ -154,6 +209,7 @@ const ADSET_FIELDS = [
   "optimization_goal",
   "billing_event",
   `targeting{${TARGETING_SUBFIELDS}}`,
+  "destination_type",
   "promoted_object",
   "is_dynamic_creative",
   "created_time",
@@ -174,6 +230,7 @@ const CREATIVE_SUBFIELDS = [
   "image_url",
   "thumbnail_url",
   "effective_object_story_id",
+  "object_story_id",
   "degrees_of_freedom_spec{creative_features_spec}",
 ].join(",");
 
@@ -204,14 +261,17 @@ export async function getAdAccounts(
 export async function getCampaigns(
   accessToken: string,
   adAccountId: string,
-  options: { status?: string; limit?: number } = {}
+  options: { status?: string; limit?: number; after?: string; fields?: string[] } = {}
 ): Promise<PaginatedResponse<MetaObject>> {
   const params = new URLSearchParams({
-    fields: CAMPAIGN_FIELDS,
+    fields: mergeFields(CAMPAIGN_FIELDS, options.fields),
     limit: String(options.limit ?? 25),
   });
   if (options.status) {
     params.set("effective_status", JSON.stringify([options.status]));
+  }
+  if (options.after) {
+    params.set("after", options.after);
   }
   return metaRequest(
     `${GRAPH_API_BASE}/act_${adAccountId}/campaigns?${params}`,
@@ -232,12 +292,15 @@ export async function getCampaign(
 export async function getAdSets(
   accessToken: string,
   campaignId: string,
-  limit = 25
+  options: { limit?: number; after?: string; fields?: string[] } = {}
 ): Promise<PaginatedResponse<MetaObject>> {
   const params = new URLSearchParams({
-    fields: ADSET_FIELDS,
-    limit: String(limit),
+    fields: mergeFields(ADSET_FIELDS, options.fields),
+    limit: String(options.limit ?? 25),
   });
+  if (options.after) {
+    params.set("after", options.after);
+  }
   return metaRequest(
     `${GRAPH_API_BASE}/${campaignId}/adsets?${params}`,
     { headers: authHeaders(accessToken) }
@@ -257,12 +320,15 @@ export async function getAdSet(
 export async function getAds(
   accessToken: string,
   adSetId: string,
-  limit = 25
+  options: { limit?: number; after?: string; fields?: string[] } = {}
 ): Promise<PaginatedResponse<MetaObject>> {
   const params = new URLSearchParams({
-    fields: AD_FIELDS,
-    limit: String(limit),
+    fields: mergeFields(AD_FIELDS, options.fields),
+    limit: String(options.limit ?? 25),
   });
+  if (options.after) {
+    params.set("after", options.after);
+  }
   return metaRequest(
     `${GRAPH_API_BASE}/${adSetId}/ads?${params}`,
     { headers: authHeaders(accessToken) }
@@ -289,6 +355,12 @@ export async function getAdCreative(
   });
 }
 
+// Includes entity identifiers (campaign/adset/ad id + name) so each row can be
+// attributed to a specific object. The Graph API returns these per row based on
+// the requested `level`.
+const INSIGHTS_FIELDS =
+  "impressions,clicks,spend,cpc,cpm,ctr,reach,actions,cost_per_action_type,action_values,conversions,conversion_values,purchase_roas,website_purchase_roas,campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name";
+
 export async function getInsights(
   accessToken: string,
   objectId: string,
@@ -297,11 +369,13 @@ export async function getInsights(
     timeRange?: { since: string; until: string };
     breakdowns?: string[];
     level?: string;
+    actionAttributionWindows?: string[];
+    fields?: string[];
   } = {}
 ): Promise<PaginatedResponse<MetaInsight>> {
-  const fields =
-    "impressions,clicks,spend,cpc,cpm,ctr,reach,actions,cost_per_action_type,action_values,conversions,conversion_values,purchase_roas,website_purchase_roas";
-  const params = new URLSearchParams({ fields });
+  const params = new URLSearchParams({
+    fields: mergeFields(INSIGHTS_FIELDS, options.fields),
+  });
 
   if (options.datePreset) {
     params.set("date_preset", options.datePreset);
@@ -314,6 +388,12 @@ export async function getInsights(
   }
   if (options.level) {
     params.set("level", options.level);
+  }
+  if (options.actionAttributionWindows?.length) {
+    params.set(
+      "action_attribution_windows",
+      JSON.stringify(options.actionAttributionWindows)
+    );
   }
 
   return metaRequest(
@@ -332,6 +412,99 @@ export async function getAudiences(
     `${GRAPH_API_BASE}/act_${adAccountId}/customaudiences?fields=${fields}&limit=${limit}`,
     { headers: authHeaders(accessToken) }
   );
+}
+
+/**
+ * Resolve the destination of a page-post-backed creative.
+ * When a creative has no inline object_story_spec, the CTA / link /
+ * lead_gen_form_id live on the underlying post, which requires a Page token to
+ * read. Derives the page token from the story id and fetches the post's
+ * call_to_action and attachments. Best-effort: never throws — returns a
+ * { resolution_error } marker on failure so the caller can degrade gracefully.
+ */
+export async function getPagePostDestination(
+  userToken: string,
+  storyId: string
+): Promise<MetaObject> {
+  const fields =
+    "id,call_to_action{type,value{link,lead_gen_form_id,app_link,application}},permalink_url,attachments{title,unshimmed_url,target,call_to_action_type}";
+  try {
+    const pageId = pageIdFromPostId(storyId);
+    let token = userToken;
+    if (pageId) {
+      try {
+        token = await getPageToken(userToken, pageId);
+      } catch {
+        // Fall back to the user token; the post read may still succeed.
+        token = userToken;
+      }
+    }
+    const params = new URLSearchParams({ fields });
+    return await metaRequest(`${GRAPH_API_BASE}/${storyId}?${params}`, {
+      headers: authHeaders(token),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { resolution_error: message };
+  }
+}
+
+const LEAD_FORM_FIELDS =
+  "id,name,status,created_time,leads_count,expired_leads_count,locale,questions";
+
+export async function getLeadForms(
+  userToken: string,
+  pageId: string,
+  options: { limit?: number; after?: string; fields?: string[] } = {}
+): Promise<PaginatedResponse<MetaObject>> {
+  const pageToken = await getPageToken(userToken, pageId);
+  const params = new URLSearchParams({
+    fields: mergeFields(LEAD_FORM_FIELDS, options.fields),
+    limit: String(options.limit ?? 25),
+  });
+  if (options.after) {
+    params.set("after", options.after);
+  }
+  return metaRequest(`${GRAPH_API_BASE}/${pageId}/leadgen_forms?${params}`, {
+    headers: authHeaders(pageToken),
+  });
+}
+
+const LEAD_FIELDS = "id,created_time,field_data,ad_id,form_id,campaign_id";
+
+export async function getFormLeads(
+  userToken: string,
+  formId: string,
+  options: { pageId?: string; limit?: number; after?: string; fields?: string[] } = {}
+): Promise<PaginatedResponse<MetaObject>> {
+  // The /leads edge requires a Page token. The caller has only a form id, so
+  // resolve the owning page (from the explicit param or the form metadata).
+  let pageId = options.pageId;
+  if (!pageId) {
+    const formMeta = await metaRequest<{ page?: { id?: string } }>(
+      `${GRAPH_API_BASE}/${formId}?fields=id,name,page{id,name}`,
+      { headers: authHeaders(userToken) }
+    );
+    pageId = formMeta.page?.id;
+  }
+  if (!pageId) {
+    throw new ConnectorError(
+      `Could not determine the Page that owns form ${formId}. Pass page_id explicitly.`,
+      "NOT_FOUND",
+      404
+    );
+  }
+  const pageToken = await getPageToken(userToken, pageId);
+  const params = new URLSearchParams({
+    fields: mergeFields(LEAD_FIELDS, options.fields),
+    limit: String(options.limit ?? 25),
+  });
+  if (options.after) {
+    params.set("after", options.after);
+  }
+  return metaRequest(`${GRAPH_API_BASE}/${formId}/leads?${params}`, {
+    headers: authHeaders(pageToken),
+  });
 }
 
 function buildUpdateParams(fields: Record<string, unknown>): URLSearchParams {
