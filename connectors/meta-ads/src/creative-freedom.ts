@@ -1,5 +1,6 @@
 import { ConnectorError } from "@custom-connectors/shared";
 import type { MetaObject } from "./api.js";
+import { isRetryableGraphError } from "./graph-scheduler.js";
 
 // ===== Nested creative-features flattening =====
 //
@@ -94,68 +95,92 @@ export interface CreativeFreedomAd {
 
 export interface CreativeFreedomResult {
   ad_account_id: string;
+  /** The effective status filter actually applied to ads (e.g. "ACTIVE"). */
+  status_filter: string;
+  /** Campaigns traversed. 0 campaigns + 0 ads reads as "broken", not "none". */
+  campaigns_scanned: number;
+  /** Ad sets traversed across all campaigns. */
+  ad_sets_scanned: number;
   ads_scanned: number;
   ads: CreativeFreedomAd[];
   summary: Record<string, number>;
 }
 
-interface Page {
+export interface GraphPage {
   data?: MetaObject[];
   paging?: { cursors?: { after?: string }; next?: string };
 }
 
 export interface CreativeFreedomDeps {
-  fetchCampaigns(opts: { after?: string }): Promise<Page>;
-  fetchAdSets(campaignId: string, opts: { after?: string }): Promise<Page>;
-  fetchAds(adSetId: string, opts: { after?: string }): Promise<Page>;
+  fetchCampaigns(opts: { after?: string }): Promise<GraphPage>;
+  fetchAdSets(campaignId: string, opts: { after?: string }): Promise<GraphPage>;
+  fetchAds(adSetId: string, opts: { after?: string }): Promise<GraphPage>;
 }
 
 export interface CreativeFreedomOptions {
   adAccountId: string;
   includeFeatures?: string[];
-  /** Max concurrent ad set / ad walks. Default 5. */
+  /** Effective status filter applied to ads; echoed back as status_filter. */
+  statusFilter?: string;
+  /** Max concurrent ad set / ad walks. Default 4. */
   concurrency?: number;
-  /** Retries per page fetch on a Graph rate-limit error. Default 4. */
+  /** Retries per page fetch on a Graph rate-limit error. Default 5. */
   maxRetries?: number;
-  /** Base backoff delay in ms (doubled each retry). Default 500. */
+  /** Base backoff delay in ms (doubled each retry). Default 2000. */
   baseDelayMs?: number;
+  /** Cap on a single backoff delay. Default 60000. */
+  maxDelayMs?: number;
   /** Injectable sleep, primarily for tests. */
   sleep?: (ms: number) => Promise<void>;
+  /** Injectable RNG in [0,1) for jitter, primarily for tests. */
+  rand?: () => number;
 }
+
+const DEFAULT_MAX_RETRIES = 5;
+const DEFAULT_BASE_DELAY_MS = 2_000;
+const DEFAULT_MAX_DELAY_MS = 60_000;
 
 const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-// Graph rate-limit / throttling error codes. metaRequest formats these into the
-// error message as "code=<n>", so detect them there.
-function isGraphRateLimitError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  return /(?:^|[^0-9])code=(?:4|17|613)(?![0-9])/.test(msg) || /rate limit/i.test(msg);
-}
-
 interface RetryOpts {
   maxRetries: number;
   baseDelayMs: number;
+  maxDelayMs: number;
   sleep: (ms: number) => Promise<void>;
+  rand: () => number;
+}
+
+// Full-jitter exponential backoff: random in [0, min(cap, base * 2^attempt)).
+function backoffDelayMs(
+  attempt: number,
+  baseDelayMs: number,
+  maxDelayMs: number,
+  rand: () => number
+): number {
+  const ceiling = Math.min(maxDelayMs, baseDelayMs * 2 ** attempt);
+  return Math.floor(rand() * ceiling);
 }
 
 async function fetchWithRetry(
-  fn: () => Promise<Page>,
+  fn: () => Promise<GraphPage>,
   describe: string,
-  { maxRetries, baseDelayMs, sleep }: RetryOpts
-): Promise<Page> {
+  { maxRetries, baseDelayMs, maxDelayMs, sleep, rand }: RetryOpts
+): Promise<GraphPage> {
   let attempt = 0;
   for (;;) {
     try {
       return await fn();
     } catch (err) {
-      if (isGraphRateLimitError(err) && attempt < maxRetries) {
-        await sleep(baseDelayMs * 2 ** attempt);
+      if (isRetryableGraphError(err) && attempt < maxRetries) {
+        await sleep(backoffDelayMs(attempt, baseDelayMs, maxDelayMs, rand));
         attempt += 1;
         continue;
       }
       // Never degrade to partial results silently: name the entity that failed
       // so the caller sees a loud, actionable error instead of a short list.
+      // Keep the attempt count — it distinguishes "throttle never cleared" from
+      // "detection missed the error and never retried".
       const detail = err instanceof Error ? err.message : String(err);
       throw new ConnectorError(
         `Failed to fetch ${describe} after ${attempt + 1} attempt(s): ${detail}. ` +
@@ -173,7 +198,7 @@ async function fetchWithRetry(
  * the last page), guarding against a repeated cursor to avoid infinite loops.
  */
 async function walkPages(
-  fetchPage: (after?: string) => Promise<Page>,
+  fetchPage: (after?: string) => Promise<GraphPage>,
   describe: string,
   retry: RetryOpts
 ): Promise<MetaObject[]> {
@@ -254,12 +279,15 @@ export async function collectAccountCreativeFreedom(
   const {
     adAccountId,
     includeFeatures,
-    concurrency = 5,
-    maxRetries = 4,
-    baseDelayMs = 500,
+    statusFilter = "ACTIVE",
+    concurrency = 4,
+    maxRetries = DEFAULT_MAX_RETRIES,
+    baseDelayMs = DEFAULT_BASE_DELAY_MS,
+    maxDelayMs = DEFAULT_MAX_DELAY_MS,
     sleep = defaultSleep,
+    rand = Math.random,
   } = options;
-  const retry: RetryOpts = { maxRetries, baseDelayMs, sleep };
+  const retry: RetryOpts = { maxRetries, baseDelayMs, maxDelayMs, sleep, rand };
 
   // Step 1: campaigns for the account.
   const campaigns = await walkPages(
@@ -310,6 +338,9 @@ export async function collectAccountCreativeFreedom(
 
   return {
     ad_account_id: adAccountId,
+    status_filter: statusFilter,
+    campaigns_scanned: campaigns.length,
+    ad_sets_scanned: adSetCtxs.length,
     ads_scanned: ads.length,
     ads,
     summary,

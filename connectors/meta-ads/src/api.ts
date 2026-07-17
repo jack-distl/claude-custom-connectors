@@ -153,7 +153,7 @@ async function metaRequest<T = unknown>(
 // ---- Campaign fields ----
 // Includes Advantage+ signals (smart_promotion_type, advantage_state_info) and
 // budget/schedule info needed to derive CBO state.
-const CAMPAIGN_FIELDS = [
+export const CAMPAIGN_FIELDS = [
   "id",
   "name",
   "status",
@@ -195,7 +195,7 @@ const TARGETING_SUBFIELDS = [
   "targeting_automation",
 ].join(",");
 
-const ADSET_FIELDS = [
+export const ADSET_FIELDS = [
   "id",
   "name",
   "campaign_id",
@@ -234,7 +234,7 @@ const CREATIVE_SUBFIELDS = [
   "degrees_of_freedom_spec{creative_features_spec}",
 ].join(",");
 
-const AD_FIELDS = [
+export const AD_FIELDS = [
   "id",
   "name",
   "status",
@@ -246,6 +246,93 @@ const AD_FIELDS = [
   "created_time",
   "updated_time",
 ].join(",");
+
+// ---- Low-level Graph GET used by the account-wide creative-freedom walk ----
+//
+// The generic shared `apiRequest` / `metaRequest` path discards response
+// headers and applies its own (non-jittered, uncapped) retry, and — because of
+// the swallowed-rethrow in metaRequest — surfaces throttle errors only as the
+// raw `API returned <status>: {"...","code":17,...}` body. The walk needs the
+// X-Business-Use-Case-Usage header for pre-emptive throttling and needs errors
+// whose code/subcode are parseable, so it uses this dedicated request instead.
+
+const GRAPH_REQUEST_TIMEOUT = 30_000;
+
+export interface GraphResponse<T = MetaObject> {
+  body: T;
+  /** Raw X-Business-Use-Case-Usage (or app/ad-account usage) header, if present. */
+  usageHeader: string | null;
+}
+
+export async function graphRequest<T = MetaObject>(
+  accessToken: string,
+  path: string,
+  params: URLSearchParams
+): Promise<GraphResponse<T>> {
+  const url = `${GRAPH_API_BASE}/${path}?${params.toString()}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GRAPH_REQUEST_TIMEOUT);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "GET",
+      headers: { "Content-Type": "application/json", ...authHeaders(accessToken) },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    // Network / abort / timeout — transient; classified retryable by the walk.
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new ConnectorError(
+      `Meta Graph request to ${path} failed (network/timeout): ${detail}`,
+      "NETWORK_ERROR",
+      503
+    );
+  }
+  clearTimeout(timer);
+
+  const usageHeader =
+    response.headers.get("x-business-use-case-usage") ??
+    response.headers.get("x-app-usage") ??
+    response.headers.get("x-ad-account-usage");
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    let code: number | undefined;
+    let subcode: number | undefined;
+    let message = text;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed?.error) {
+        code = parsed.error.code;
+        subcode = parsed.error.error_subcode;
+        message = parsed.error.message ?? text;
+      }
+    } catch {
+      // keep raw text
+    }
+    // Surface status + code + subcode in a parseable form ("code=17 | subcode=..")
+    // so the retry classifier can recognise soft throttles regardless of
+    // Meta's is_transient flag.
+    const detail = [
+      `status=${response.status}`,
+      message,
+      code !== undefined ? `code=${code}` : null,
+      subcode !== undefined ? `subcode=${subcode}` : null,
+    ]
+      .filter(Boolean)
+      .join(" | ");
+    throw new ConnectorError(
+      `Meta Graph API error: ${detail}`,
+      "META_API_ERROR",
+      response.status
+    );
+  }
+
+  const body = (await response.json()) as T;
+  return { body, usageHeader };
+}
 
 export async function getAdAccounts(
   accessToken: string,
@@ -320,16 +407,12 @@ export async function getAdSet(
 export async function getAds(
   accessToken: string,
   adSetId: string,
-  options: { status?: string; limit?: number; after?: string; fields?: string[] } = {}
+  options: { limit?: number; after?: string; fields?: string[] } = {}
 ): Promise<PaginatedResponse<MetaObject>> {
   const params = new URLSearchParams({
     fields: mergeFields(AD_FIELDS, options.fields),
     limit: String(options.limit ?? 25),
   });
-  if (options.status) {
-    // The /ads edge filters on effective_status (an array), mirroring campaigns.
-    params.set("effective_status", JSON.stringify([options.status]));
-  }
   if (options.after) {
     params.set("after", options.after);
   }

@@ -119,12 +119,19 @@ Inputs:
 
 **Nested flags:** `creative_features_spec` is not flat — a feature can be `OPT_OUT` at the top level while a customization nested under `customizations` is `OPT_IN`. These are flattened to dotted keys (`enhance_cta.text_extraction`) and treated as first-class entries in the on/off arrays, so an ad that looks clean at the top level but has an enhancement enabled underneath is still surfaced. Unknown feature keys pass through rather than being dropped.
 
-**No silent partial results:** ad set and ad walks run in parallel with a concurrency cap and retry/backoff on Graph rate-limit errors (codes 4, 17, 613). If a page still fails, the whole call raises an error naming the campaign or ad set that failed — a loud failure instead of a short list that looks complete.
+**Throttling & retries:** every Graph request goes through a per-account limiter (a module singleton, so two concurrent walks on the same account queue instead of competing for the account's API budget). It caps concurrency at 4 across the whole walk and reads the `X-Business-Use-Case-Usage` header to pre-emptively slow down once utilisation crosses ~75%, rather than waiting for the 429 to land. Rate-limit errors (codes **4, 17, 613, 80000-80004** and subcode 2446079) are retried with exponential backoff + jitter (~5 retries, base 2s, cap 60s). Code 17 is treated as retryable even though Meta reports it `is_transient:false` — it is a soft throttle that clears on its own.
 
-Output shape (one flat row per ad, plus a summary):
+**No silent partial results:** if a page still fails after retries, the whole call raises `INCOMPLETE_WALK` naming the campaign or ad set that failed (with the attempt count) — a loud failure instead of a short list that looks complete.
+
+**Empty vs broken:** the response always includes `campaigns_scanned`, `ad_sets_scanned`, and the `status_filter` applied. So `0 ads / 13 campaigns / ACTIVE` reads as *genuinely none active*, while `0 ads / 0 campaigns` reads as *broken* — removing the exact false-negative this tool exists to prevent.
+
+Output shape (one flat row per ad, plus counters and a summary):
 ```json
 {
   "ad_account_id": "123",
+  "status_filter": "ACTIVE",
+  "campaigns_scanned": 13,
+  "ad_sets_scanned": 27,
   "ads_scanned": 42,
   "ads": [
     {
@@ -133,14 +140,14 @@ Output shape (one flat row per ad, plus a summary):
       "campaign_id": "...", "campaign_name": "...",
       "creative_id": "...",
       "features_on": ["image_uncrop", "site_extensions", "enhance_cta.text_extraction"],
-      "features_off": ["enhance_cta"],
+      "features_off": ["advantage_plus_creative", "enhance_cta"],
       "features_raw": { "...": "creative_features_spec verbatim" }
     }
   ],
   "summary": { "image_uncrop": 12, "enhance_cta.text_extraction": 3 }
 }
 ```
-`summary` maps each feature key to the count of ads with it **ON** — the "how many" that always follows "which".
+`summary` maps each feature key (including dotted nested keys) to the count of ads with it **ON** — the "how many" that always follows "which".
 
 ### `get_insights`
 Pulls performance metrics (impressions, clicks, spend, CPC, CPM, CTR, reach) and conversion data (actions, cost per action type, action values, conversions, conversion values, purchase ROAS, website purchase ROAS) for any ad object. Supports date presets, custom date ranges, breakdowns (age, gender, country, placement, `action_type`), aggregation levels, and `action_attribution_windows`.

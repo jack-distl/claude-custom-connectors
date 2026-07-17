@@ -5,6 +5,11 @@ import {
   flattenCreativeFeatures,
   type CreativeFreedomDeps,
 } from "./creative-freedom.js";
+import {
+  isRetryableGraphError,
+  parseBusinessUseCaseUsage,
+  AccountRateLimiter,
+} from "./graph-scheduler.js";
 
 // ---- Test fixtures: a three-level tree with more than one page at EVERY level ----
 //
@@ -113,6 +118,11 @@ test("walks all levels to exhaustion and returns every ad", async () => {
   assert.equal(result.ads_scanned, 27, "every ad must be scanned");
   assert.equal(result.ads.length, 27);
 
+  // Scan counters disambiguate genuine emptiness from a broken walk.
+  assert.equal(result.campaigns_scanned, 3);
+  assert.equal(result.ad_sets_scanned, 9);
+  assert.equal(result.status_filter, "ACTIVE");
+
   const gotAdIds = new Set(result.ads.map((a) => a.ad_id));
   assert.deepEqual(gotAdIds, expectedAdIds, "no ad may be missing");
 
@@ -196,7 +206,7 @@ test("fails loudly naming the ad set when an ads page cannot be fetched", async 
   );
 });
 
-test("retries rate-limited page fetches (code=4) then succeeds", async () => {
+test("retries a soft throttle (code 17, is_transient:false) then succeeds", async () => {
   let calls = 0;
   const sleeps: number[] = [];
   const deps = makeDeps({
@@ -204,7 +214,10 @@ test("retries rate-limited page fetches (code=4) then succeeds", async () => {
       if (adSetId === "c1-as1" && !after) {
         calls += 1;
         if (calls < 3) {
-          throw new Error("Meta Graph API error: rate limited | code=4 | fbtrace_id=abc");
+          // Real payload: code 17 is reported is_transient:false but is retryable.
+          throw new Error(
+            "Meta Graph API error: status=400 | (#17) User request limit reached | code=17 | subcode=2446079"
+          );
         }
       }
       return paginate(ADS[adSetId] ?? [], 2, after);
@@ -212,14 +225,120 @@ test("retries rate-limited page fetches (code=4) then succeeds", async () => {
   });
   const result = await collectAccountCreativeFreedom(deps, {
     adAccountId: "act123",
-    baseDelayMs: 1,
+    baseDelayMs: 2000,
+    maxDelayMs: 60000,
+    rand: () => 0.5, // deterministic jitter: half of the ceiling
     sleep: async (ms) => {
       sleeps.push(ms);
     },
   });
   assert.equal(result.ads_scanned, 27, "all ads still returned after retries");
   assert.equal(calls, 3, "retried twice before succeeding");
-  assert.deepEqual(sleeps, [1, 2], "exponential backoff between retries");
+  assert.equal(sleeps.length, 2, "backed off once per retry");
+  // Full-jitter exponential: ceilings 2000, 4000 -> 0.5 * each.
+  assert.deepEqual(sleeps, [1000, 2000]);
+  assert.ok(sleeps.every((s) => s <= 60000), "each delay capped at 60s");
+});
+
+// ---- Fix 4: nested flattening, using a real spec from Triumph creative 2148983168850330 ----
+// The trap: enhance_cta is OPT_OUT (features_off) while its own nested
+// enhance_cta.text_extraction is OPT_IN (features_on) — same feature, opposite
+// sides. text_optimizations is OPT_OUT with a nested OPT_OUT (both off).
+const TRIUMPH_SPEC = {
+  advantage_plus_creative: { enroll_status: "OPT_OUT" },
+  enhance_cta: {
+    enroll_status: "OPT_OUT",
+    customizations: { text_extraction: { enroll_status: "OPT_IN" } },
+  },
+  image_uncrop: { enroll_status: "OPT_IN" },
+  site_extensions: { enroll_status: "OPT_IN" },
+  text_optimizations: {
+    enroll_status: "OPT_OUT",
+    customizations: { text_extraction: { enroll_status: "OPT_OUT" } },
+  },
+};
+
+test("flattenCreativeFeatures splits the real Triumph spec onto the right sides", () => {
+  const { on, off } = flattenCreativeFeatures(TRIUMPH_SPEC);
+
+  for (const key of ["image_uncrop", "site_extensions", "enhance_cta.text_extraction"]) {
+    assert.ok(on.includes(key), `${key} must be ON`);
+  }
+  for (const key of [
+    "advantage_plus_creative",
+    "enhance_cta",
+    "text_optimizations",
+    "text_optimizations.text_extraction",
+  ]) {
+    assert.ok(off.includes(key), `${key} must be OFF`);
+  }
+  // Same feature, opposite sides — the whole point.
+  assert.ok(off.includes("enhance_cta") && on.includes("enhance_cta.text_extraction"));
+  assert.ok(!on.includes("enhance_cta"), "enhance_cta itself must not be ON");
+  assert.ok(
+    !off.includes("enhance_cta.text_extraction"),
+    "nested OPT_IN must not be OFF"
+  );
+});
+
+test("summary counts dotted keys as first-class entries", async () => {
+  // Every ad carries the Triumph spec; assert dotted keys are counted like the rest.
+  const spec = TRIUMPH_SPEC;
+  const oneAd = (adSetId: string, n: number): AdRecord => ({
+    id: `${adSetId}-ad${n}`,
+    name: `Ad ${n}`,
+    effective_status: "ACTIVE",
+    creative: {
+      id: `${adSetId}-ad${n}-cr`,
+      degrees_of_freedom_spec: { creative_features_spec: spec },
+    },
+  });
+  const adsBySet: Record<string, AdRecord[]> = {};
+  for (const list of Object.values(ADSETS)) {
+    for (const as of list) adsBySet[as.id] = [1, 2, 3].map((n) => oneAd(as.id, n));
+  }
+  const deps = makeDeps({
+    fetchAds: async (adSetId, { after }) => paginate(adsBySet[adSetId] ?? [], 2, after),
+  });
+  const result = await collectAccountCreativeFreedom(deps, {
+    adAccountId: "act123",
+    sleep: NOOP_SLEEP,
+  });
+  assert.equal(result.ads_scanned, 27);
+  // All 27 ads have the dotted OPT_IN and the plain OPT_INs.
+  assert.equal(result.summary["enhance_cta.text_extraction"], 27);
+  assert.equal(result.summary.image_uncrop, 27);
+  assert.equal(result.summary.site_extensions, 27);
+  // OPT_OUT features never appear in the ON summary.
+  assert.equal(result.summary.enhance_cta, undefined);
+  assert.equal(result.summary["text_optimizations.text_extraction"], undefined);
+});
+
+// ---- REGRESSION: rate-limit on page 2 of one ad set must not lose any ad ----
+test("recovers a mid-pagination throttle and still returns every ad", async () => {
+  const thrown = new Set<string>();
+  const deps = makeDeps({
+    fetchAds: async (adSetId, { after }) => {
+      // Fail once on page 2 (after is set) of exactly one ad set, then succeed.
+      if (adSetId === "c2-as2" && after && !thrown.has(after)) {
+        thrown.add(after);
+        throw new Error(
+          "Meta Graph API error: status=400 | Ad account has too many API calls | code=17 | subcode=2446079"
+        );
+      }
+      return paginate(ADS[adSetId] ?? [], 2, after);
+    },
+  });
+  const result = await collectAccountCreativeFreedom(deps, {
+    adAccountId: "act123",
+    rand: () => 0,
+    sleep: NOOP_SLEEP,
+  });
+  // The whole point of the tool: a transient throttle mid-walk loses nothing.
+  assert.equal(result.ads_scanned, 27, "every ad returns despite a page-2 throttle");
+  assert.ok(thrown.size >= 1, "the throttle path actually executed");
+  const ids = new Set(result.ads.map((a) => a.ad_id));
+  for (const n of [1, 2, 3]) assert.ok(ids.has(`c2-as2-ad${n}`));
 });
 
 // Direct unit coverage of the flattener's edge cases.
@@ -232,4 +351,81 @@ test("flattenCreativeFeatures passes through unknown keys and empty spec", () =>
   });
   assert.deepEqual(on, ["some_future_feature"]);
   assert.deepEqual(off, ["another_one"]);
+});
+
+// ---- Graph scheduler: retryable classification + usage parsing + limiter ----
+
+test("isRetryableGraphError recognises throttles in both code spellings", () => {
+  // graphRequest form.
+  assert.ok(isRetryableGraphError(new Error("status=400 | ... | code=17 | subcode=2446079")));
+  // raw shared-client body form ("code":17).
+  assert.ok(
+    isRetryableGraphError(new Error('API returned 400: {"error":{"message":"x","code":17}}'))
+  );
+  assert.ok(isRetryableGraphError(new Error("code=4")));
+  assert.ok(isRetryableGraphError(new Error("code=613")));
+  assert.ok(isRetryableGraphError(new Error("code=80004")));
+  assert.ok(isRetryableGraphError(new Error("NETWORK_ERROR: fetch failed")));
+  assert.ok(isRetryableGraphError(new Error("API returned 429: too many requests")));
+  // Not retryable: auth / validation.
+  assert.ok(!isRetryableGraphError(new Error("status=401 | invalid token | code=190")));
+  assert.ok(!isRetryableGraphError(new Error("boom: network down")));
+});
+
+test("parseBusinessUseCaseUsage extracts the max utilisation bucket", () => {
+  const header = JSON.stringify({
+    "1234567890": [
+      {
+        type: "ads_management",
+        call_count: 82,
+        total_cputime: 25,
+        total_time: 40,
+        estimated_time_to_regain_access: 3,
+      },
+    ],
+  });
+  const usage = parseBusinessUseCaseUsage(header);
+  assert.ok(usage);
+  assert.equal(usage.maxPct, 82);
+  assert.equal(usage.estimatedRegainMs, 3 * 60_000);
+  assert.equal(parseBusinessUseCaseUsage(null), null);
+  assert.equal(parseBusinessUseCaseUsage("not json"), null);
+});
+
+test("AccountRateLimiter caps concurrency and pre-emptively cools down at >75%", async () => {
+  let inFlight = 0;
+  let maxInFlight = 0;
+  let clock = 0;
+  const sleeps: number[] = [];
+  const limiter = new AccountRateLimiter(
+    2, // cap 2 concurrent
+    async (ms) => {
+      sleeps.push(ms);
+      clock += ms;
+    },
+    () => clock
+  );
+
+  // First batch: no usage pressure, just prove the concurrency cap holds.
+  const lowUsage = JSON.stringify({ x: [{ call_count: 10 }] });
+  const tasks = Array.from({ length: 6 }, () =>
+    limiter.schedule(async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await Promise.resolve();
+      inFlight -= 1;
+      return { result: true, usageHeader: lowUsage };
+    })
+  );
+  await Promise.all(tasks);
+  assert.ok(maxInFlight <= 2, `concurrency capped at 2 (saw ${maxInFlight})`);
+
+  // A high-usage response should arm a cooldown that the next request waits on.
+  await limiter.schedule(async () => ({
+    result: true,
+    usageHeader: JSON.stringify({ x: [{ call_count: 90 }] }),
+  }));
+  const before = sleeps.length;
+  await limiter.schedule(async () => ({ result: true, usageHeader: lowUsage }));
+  assert.ok(sleeps.length > before, "pre-emptive cooldown slept before the next call");
 });

@@ -21,6 +21,7 @@ import {
   type MetaObject,
 } from "./api.js";
 import { collectAccountCreativeFreedom } from "./creative-freedom.js";
+import { createGraphWalkDeps, getAccountRateLimiter } from "./graph-scheduler.js";
 
 function toolResult(data: unknown) {
   return {
@@ -445,24 +446,20 @@ export function registerTools(server: McpServer) {
       try {
         const access_token = getAccessToken(extra);
         const effectiveStatus = status ?? "ACTIVE";
-        const result = await collectAccountCreativeFreedom(
-          {
-            fetchCampaigns: ({ after }) =>
-              getCampaigns(access_token, ad_account_id, { limit: 500, after }),
-            fetchAdSets: (campaignId, { after }) =>
-              getAdSets(access_token, campaignId, { limit: 500, after }),
-            fetchAds: (adSetId, { after }) =>
-              getAds(access_token, adSetId, {
-                limit: 500,
-                after,
-                status: effectiveStatus,
-              }),
-          },
-          {
-            adAccountId: ad_account_id,
-            includeFeatures: include_features,
-          }
-        );
+        // Per-account limiter (module singleton) caps concurrency across the
+        // whole walk and serialises concurrent walks on the same account.
+        const limiter = getAccountRateLimiter(ad_account_id);
+        const deps = createGraphWalkDeps({
+          accessToken: access_token,
+          adAccountId: ad_account_id,
+          statusFilter: effectiveStatus,
+          limiter,
+        });
+        const result = await collectAccountCreativeFreedom(deps, {
+          adAccountId: ad_account_id,
+          includeFeatures: include_features,
+          statusFilter: effectiveStatus,
+        });
         return toolResult(result);
       } catch (error) {
         return errorResult(error);
