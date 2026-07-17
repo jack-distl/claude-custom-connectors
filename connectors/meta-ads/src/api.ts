@@ -320,12 +320,16 @@ export async function getAdSet(
 export async function getAds(
   accessToken: string,
   adSetId: string,
-  options: { limit?: number; after?: string; fields?: string[] } = {}
+  options: { status?: string; limit?: number; after?: string; fields?: string[] } = {}
 ): Promise<PaginatedResponse<MetaObject>> {
   const params = new URLSearchParams({
     fields: mergeFields(AD_FIELDS, options.fields),
     limit: String(options.limit ?? 25),
   });
+  if (options.status) {
+    // The /ads edge filters on effective_status (an array), mirroring campaigns.
+    params.set("effective_status", JSON.stringify([options.status]));
+  }
   if (options.after) {
     params.set("after", options.after);
   }
