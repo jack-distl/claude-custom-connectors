@@ -109,6 +109,39 @@ Output shape:
 }
 ```
 
+### `get_account_creative_freedom`
+Answers **"which ads in this account have Advantage+ Creative / AI enhancements enabled"** in a single call. Walks every campaign → ad set → ad in the account **server-side**, following all pagination to exhaustion (500 per page), so the caller never has to chase `after` cursors and can't silently under-report. It reuses the same creative expansion as `get_ads` (`degrees_of_freedom_spec.creative_features_spec`) — no per-ad `get_ad_creative` call.
+
+Inputs:
+- `ad_account_id` — numeric, no `act_` prefix.
+- `status` — optional, filters **ads** by effective status (default `ACTIVE`). Campaigns and ad sets are always fully traversed.
+- `include_features` — optional array; restricts `features_on` / `features_off` and the `summary` to these feature keys. A top-level key (e.g. `enhance_cta`) also keeps its nested customizations (`enhance_cta.text_extraction`). `features_raw` is always returned verbatim.
+
+**Nested flags:** `creative_features_spec` is not flat — a feature can be `OPT_OUT` at the top level while a customization nested under `customizations` is `OPT_IN`. These are flattened to dotted keys (`enhance_cta.text_extraction`) and treated as first-class entries in the on/off arrays, so an ad that looks clean at the top level but has an enhancement enabled underneath is still surfaced. Unknown feature keys pass through rather than being dropped.
+
+**No silent partial results:** ad set and ad walks run in parallel with a concurrency cap and retry/backoff on Graph rate-limit errors (codes 4, 17, 613). If a page still fails, the whole call raises an error naming the campaign or ad set that failed — a loud failure instead of a short list that looks complete.
+
+Output shape (one flat row per ad, plus a summary):
+```json
+{
+  "ad_account_id": "123",
+  "ads_scanned": 42,
+  "ads": [
+    {
+      "ad_id": "...", "ad_name": "...", "ad_status": "ACTIVE",
+      "adset_id": "...", "adset_name": "...",
+      "campaign_id": "...", "campaign_name": "...",
+      "creative_id": "...",
+      "features_on": ["image_uncrop", "site_extensions", "enhance_cta.text_extraction"],
+      "features_off": ["enhance_cta"],
+      "features_raw": { "...": "creative_features_spec verbatim" }
+    }
+  ],
+  "summary": { "image_uncrop": 12, "enhance_cta.text_extraction": 3 }
+}
+```
+`summary` maps each feature key to the count of ads with it **ON** — the "how many" that always follows "which".
+
 ### `get_insights`
 Pulls performance metrics (impressions, clicks, spend, CPC, CPM, CTR, reach) and conversion data (actions, cost per action type, action values, conversions, conversion values, purchase ROAS, website purchase ROAS) for any ad object. Supports date presets, custom date ranges, breakdowns (age, gender, country, placement, `action_type`), aggregation levels, and `action_attribution_windows`.
 

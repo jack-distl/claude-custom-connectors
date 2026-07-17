@@ -20,6 +20,7 @@ import {
   updateAd,
   type MetaObject,
 } from "./api.js";
+import { collectAccountCreativeFreedom } from "./creative-freedom.js";
 
 function toolResult(data: unknown) {
   return {
@@ -414,6 +415,55 @@ export function registerTools(server: McpServer) {
           data,
           paging: result.paging,
         });
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  server.tool(
+    "get_account_creative_freedom",
+    "Answer 'which ads in this Meta account have Advantage+ Creative / AI enhancements enabled' in ONE call. Walks every campaign -> ad set -> ad server-side (following all pagination, so nothing is silently under-reported) and returns one flat row per ad with the creative features that are ON vs OFF, plus a summary count per feature. Nested customizations are flattened to dotted keys (e.g. 'enhance_cta.text_extraction'), so a feature that is OPT_OUT at the top level but OPT_IN on a nested customization is still surfaced. Fails loudly if any page cannot be fetched rather than returning a partial list. Use this instead of manually walking get_campaigns -> get_ad_sets -> get_ads.",
+    {
+      ad_account_id: z
+        .string()
+        .describe("Ad account ID (numeric, without 'act_' prefix)"),
+      status: z
+        .string()
+        .optional()
+        .describe(
+          "Filter ads by effective status (default 'ACTIVE'). E.g. ACTIVE, PAUSED, ARCHIVED. Campaigns and ad sets are always fully traversed regardless."
+        ),
+      include_features: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Optional: restrict features_on/features_off and the summary to these feature keys (e.g. ['enhance_cta','image_uncrop']). A top-level key also keeps its nested customizations. features_raw is always returned verbatim."
+        ),
+    },
+    async ({ ad_account_id, status, include_features }, extra) => {
+      try {
+        const access_token = getAccessToken(extra);
+        const effectiveStatus = status ?? "ACTIVE";
+        const result = await collectAccountCreativeFreedom(
+          {
+            fetchCampaigns: ({ after }) =>
+              getCampaigns(access_token, ad_account_id, { limit: 500, after }),
+            fetchAdSets: (campaignId, { after }) =>
+              getAdSets(access_token, campaignId, { limit: 500, after }),
+            fetchAds: (adSetId, { after }) =>
+              getAds(access_token, adSetId, {
+                limit: 500,
+                after,
+                status: effectiveStatus,
+              }),
+          },
+          {
+            adAccountId: ad_account_id,
+            includeFeatures: include_features,
+          }
+        );
+        return toolResult(result);
       } catch (error) {
         return errorResult(error);
       }
