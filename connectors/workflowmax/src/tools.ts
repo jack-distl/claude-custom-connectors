@@ -532,11 +532,11 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "create_timesheet",
-    "Log time in WorkflowMax. Creates a new timesheet entry for a job.",
+    "Log time in WorkflowMax. Creates a new timesheet entry for a job. The task_id is required and must be the job-task UUID for this job (get it from list_job_tasks or get_job with includes=tasks, using tasks[].uuid — NOT the global task-template tasks[].taskUUID).",
     {
       job_id: z.string().describe("Job ID to log time against (required)"),
       staff_id: z.string().describe("Staff member ID (required)"),
-      task_id: z.string().optional().describe("Task ID within the job"),
+      task_id: z.string().describe("Job-task UUID within the job (required). This is tasks[].uuid from list_job_tasks / get_job includes=tasks, NOT the global task-template UUID."),
       date: z.string().describe("Date of the time entry (YYYY-MM-DD, required)"),
       minutes: z.number().describe("Duration in minutes (required)"),
       note: z.string().optional().describe("Description of work performed"),
@@ -548,7 +548,7 @@ export function registerTools(server: McpServer) {
         const result = await api.createTimesheet(token, {
           jobuuid: params.job_id,
           staffuuid: params.staff_id,
-          taskuuid: params.task_id,
+          jobtaskuuid: params.task_id,
           date: params.date,
           minutes: params.minutes,
           note: params.note,
@@ -570,17 +570,17 @@ export function registerTools(server: McpServer) {
       minutes: z.number().optional().describe("Duration in minutes"),
       note: z.string().optional().describe("Description of work performed"),
       billable: z.boolean().optional().describe("Whether this time is billable"),
-      task_id: z.string().optional().describe("Task ID within the job"),
+      task_id: z.string().optional().describe("Job-task UUID within the job (tasks[].uuid from list_job_tasks / get_job includes=tasks)"),
     },
     async (params, extra) => {
       try {
         const token = getAccessToken(extra);
-        const data: Partial<api.WfmTimesheet> = {};
+        const data: api.UpdateTimesheetRequest = {};
         if (params.date !== undefined) data.date = params.date;
         if (params.minutes !== undefined) data.minutes = params.minutes;
         if (params.note !== undefined) data.note = params.note;
         if (params.billable !== undefined) data.billable = params.billable;
-        if (params.task_id !== undefined) data.taskId = params.task_id;
+        if (params.task_id !== undefined) data.jobtaskuuid = params.task_id;
         const result = await api.updateTimesheet(token, params.timesheet_id, data);
         return toolResult(result);
       } catch (error) {
@@ -1034,7 +1034,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "list_job_tasks",
-    "List tasks assigned to a specific job. These are job-level task assignments, not global task templates.",
+    "List tasks assigned to a specific job. These are job-level task assignments, not global task templates. Each returned task's `uuid` is the job-task UUID required by create_timesheet.",
     {
       job_id: z.string().describe("Job UUID to list tasks for (required)"),
       page: z.number().optional().describe("Page number for pagination"),

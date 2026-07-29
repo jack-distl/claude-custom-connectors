@@ -234,11 +234,24 @@ export interface WfmTimesheet {
 export interface CreateTimesheetRequest {
   jobuuid: string;
   staffuuid: string;
-  taskuuid?: string;
+  // The job-task UUID (WorkflowMax field name: `jobtaskuuid`). This is the
+  // per-job task assignment UUID (get_job includes=tasks → tasks[].uuid), NOT
+  // the global task-template UUID (tasks[].taskUUID). WorkflowMax rejects the
+  // add with "jobtaskuuid is required" if this is missing or misnamed.
+  jobtaskuuid: string;
   date: string;
   minutes: number;
   note?: string;
   billable?: boolean;
+}
+
+export interface UpdateTimesheetRequest {
+  date?: string;
+  minutes?: number;
+  note?: string;
+  billable?: boolean;
+  // Job-task UUID — see CreateTimesheetRequest.jobtaskuuid.
+  jobtaskuuid?: string;
 }
 
 export interface WfmInvoice {
@@ -561,7 +574,7 @@ export async function createTimesheet(
 export async function updateTimesheet(
   accessToken: string,
   timesheetId: string,
-  data: Partial<WfmTimesheet>
+  data: UpdateTimesheetRequest
 ): Promise<WfmTimesheet> {
   return wfmRequest<WfmTimesheet>(`${BASE_URL}/timesheets/${timesheetId}`, {
     method: "PUT",
@@ -789,10 +802,14 @@ export async function listJobTasks(
   accessToken: string,
   params: { jobId: string; page?: number; pageSize?: number }
 ): Promise<PaginatedResponse<WfmJobTask>> {
-  return wfmRequest<PaginatedResponse<WfmJobTask>>(
-    `${BASE_URL}/jobs/tasks${qs({ job: params.jobId, page: params.page, pageSize: params.pageSize })}`,
-    { headers: authHeaders(accessToken) }
-  );
+  // The `/jobs/tasks?job=<id>` endpoint ignores the `job` filter and returns
+  // the global task list regardless of the job passed. To reliably retrieve a
+  // single job's task assignments, fetch the job with its tasks included and
+  // return those. Each task's `uuid` is the job-task UUID required by
+  // create_timesheet (jobtaskuuid).
+  const job = await getJob(accessToken, params.jobId, "tasks");
+  const tasks = (job as unknown as { tasks?: WfmJobTask[] }).tasks ?? [];
+  return { data: tasks, totalCount: tasks.length };
 }
 
 export async function createJobTask(
