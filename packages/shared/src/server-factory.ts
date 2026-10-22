@@ -1,6 +1,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import {
+  createOAuthMetadata,
+  mcpAuthMetadataRouter,
+  mcpAuthRouter,
+} from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { randomUUID } from "node:crypto";
 import type { ConnectorConfig } from "./types.js";
@@ -57,6 +61,30 @@ export async function startServer(
   if (config.oauth) {
     const provider = new ConnectorOAuthProvider(config.oauth);
     const issuerUrl = new URL(config.oauth.serverUrl);
+
+    // The SDK advertises `issuerUrl.href`, which for a bare domain ends in "/"
+    // ("https://x.up.railway.app/"). Claude requires the issuer to be exactly
+    // the URL the metadata is published under, so serve the metadata with
+    // the slash-free issuer. Mounted first so it wins over the SDK's copy.
+    const oauthMetadata = {
+      ...createOAuthMetadata({
+        provider,
+        issuerUrl,
+        scopesSupported: config.oauth.scopes,
+      }),
+      issuer: provider.issuer,
+    };
+    app.use(
+      mcpAuthMetadataRouter({
+        oauthMetadata,
+        resourceServerUrl: issuerUrl,
+        scopesSupported: config.oauth.scopes,
+      })
+    );
+
+    if (config.oauth.proxyCallback) {
+      app.get("/oauth/callback", (req, res) => provider.handleCallback(req, res));
+    }
 
     app.use(
       mcpAuthRouter({

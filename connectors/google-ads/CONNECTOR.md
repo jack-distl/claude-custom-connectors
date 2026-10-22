@@ -9,6 +9,7 @@ Read-only Google Ads API connector — query campaigns, ad groups, ads, keywords
 - **Token URL:** `https://oauth2.googleapis.com/token`
 - **Authorize URL:** `https://accounts.google.com/o/oauth2/v2/auth`
 - **Authorize params:** `access_type=offline`, `prompt=consent` (so Google issues a refresh token; the connector then refreshes silently and the user does not need to re-authenticate every hour)
+- **Redirect URI:** `<SERVER_URL>/oauth/callback` must be listed under **Authorized redirect URIs** on the OAuth client in Google Cloud Console. Google redirects back to the connector (not straight to Claude) so the connector can replace Google's `iss` parameter with its own; otherwise Claude refuses the sign-in ("couldn't confirm the identity of Google Ads's sign-in service").
 - **Additional:** Requires a Google Ads API developer token
 
 ## API Access Level
