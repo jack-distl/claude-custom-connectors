@@ -18,6 +18,8 @@ const config = {
       access_type: "offline",
       prompt: "consent",
     },
+    // Google adds its own `iss` to the redirect, which Claude rejects.
+    proxyCallback: true,
   },
 };
 

@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type { Response } from "express";
+import type { Request, Response } from "express";
 import type {
   OAuthClientInformationFull,
   OAuthTokens,
@@ -36,15 +36,35 @@ function parseTokenBody(body: string): Record<string, unknown> | null {
   }
 }
 
+/** How long an in-flight authorization (user on the provider's consent screen) stays valid. */
+const PENDING_AUTH_TTL_MS = 10 * 60 * 1000;
+
+/** Issuer identifier for this server: its origin + path, without a trailing slash. */
+export function issuerFor(serverUrl: string): string {
+  return new URL(serverUrl).href.replace(/\/+$/, "");
+}
+
+interface PendingAuthorization {
+  redirectUri: string;
+  state?: string;
+  expiresAt: number;
+}
+
 /**
  * OAuth provider that proxies authorization to an upstream provider (e.g., Meta, Google).
  * Handles dynamic client registration in-memory and forwards auth/token requests upstream.
  */
 export class ConnectorOAuthProvider implements OAuthServerProvider {
   private clients = new Map<string, OAuthClientInformationFull>();
+  private pendingAuthorizations = new Map<string, PendingAuthorization>();
   skipLocalPkceValidation = true;
+  readonly issuer: string;
+  readonly callbackUrl: string;
 
-  constructor(private config: OAuthProxyConfig) {}
+  constructor(private config: OAuthProxyConfig) {
+    this.issuer = issuerFor(config.serverUrl);
+    this.callbackUrl = `${this.issuer}/oauth/callback`;
+  }
 
   get clientsStore(): OAuthRegisteredClientsStore {
     return {
@@ -75,14 +95,60 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
     const url = new URL(this.config.authorizeUrl);
     url.searchParams.set("client_id", this.config.clientId);
     url.searchParams.set("response_type", "code");
-    url.searchParams.set("redirect_uri", params.redirectUri);
     const scopes = (params.scopes ?? this.config.scopes).join(" ");
     url.searchParams.set("scope", scopes);
-    if (params.state) url.searchParams.set("state", params.state);
+    if (this.config.proxyCallback) {
+      // Send the provider back to us; handleCallback() forwards to Claude.
+      const key = crypto.randomUUID();
+      this.prunePendingAuthorizations();
+      this.pendingAuthorizations.set(key, {
+        redirectUri: params.redirectUri,
+        state: params.state,
+        expiresAt: Date.now() + PENDING_AUTH_TTL_MS,
+      });
+      url.searchParams.set("redirect_uri", this.callbackUrl);
+      url.searchParams.set("state", key);
+    } else {
+      url.searchParams.set("redirect_uri", params.redirectUri);
+      if (params.state) url.searchParams.set("state", params.state);
+    }
     for (const [key, value] of Object.entries(this.config.authorizeParams ?? {})) {
       if (!url.searchParams.has(key)) url.searchParams.set(key, value);
     }
     res.redirect(url.toString());
+  }
+
+  /**
+   * `/oauth/callback` handler (only used with `proxyCallback`). Forwards the
+   * provider's code (or error) to Claude's original redirect URI with
+   * Claude's original state, and sets `iss` to this server's issuer
+   * (RFC 9207) in place of whatever the provider sent.
+   */
+  handleCallback(req: Request, res: Response): void {
+    const key = typeof req.query.state === "string" ? req.query.state : "";
+    const pending = this.pendingAuthorizations.get(key);
+    this.pendingAuthorizations.delete(key);
+    if (!pending || pending.expiresAt < Date.now()) {
+      console.error("[OAuth] Callback with unknown or expired state");
+      res.status(400).send("This sign-in link has expired. Please try connecting again.");
+      return;
+    }
+
+    const target = new URL(pending.redirectUri);
+    for (const name of ["code", "error", "error_description", "error_uri"]) {
+      const value = req.query[name];
+      if (typeof value === "string") target.searchParams.set(name, value);
+    }
+    if (pending.state) target.searchParams.set("state", pending.state);
+    target.searchParams.set("iss", this.issuer);
+    res.redirect(target.toString());
+  }
+
+  private prunePendingAuthorizations(): void {
+    const now = Date.now();
+    for (const [key, pending] of this.pendingAuthorizations) {
+      if (pending.expiresAt < now) this.pendingAuthorizations.delete(key);
+    }
   }
 
   async challengeForAuthorizationCode(
@@ -105,7 +171,10 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
       client_id: this.config.clientId,
       client_secret: this.config.clientSecret,
     });
-    if (redirectUri) params.set("redirect_uri", redirectUri);
+    // The provider issued the code against whichever redirect URI it was
+    // given in authorize(), so the exchange must repeat that one.
+    if (this.config.proxyCallback) params.set("redirect_uri", this.callbackUrl);
+    else if (redirectUri) params.set("redirect_uri", redirectUri);
 
     const data = await this.postToTokenEndpoint(params, "Token exchange");
 

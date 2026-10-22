@@ -23,6 +23,16 @@ export interface OAuthProxyConfig {
    * tokens, so ~60 days is the ceiling before a re-auth is needed).
    */
   longLivedTokenExchange?: boolean;
+  /**
+   * Route the upstream redirect through this server's `/oauth/callback`
+   * instead of sending the user straight back to Claude. Needed for
+   * providers that add their own `iss` to the authorization response (e.g.
+   * Google): Claude rejects an `iss` that doesn't match this server's
+   * issuer, so the callback swaps it for ours. Requires
+   * `<SERVER_URL>/oauth/callback` to be registered as an authorized redirect
+   * URI in the provider's OAuth app.
+   */
+  proxyCallback?: boolean;
 }
 
 export interface ConnectorConfig {
