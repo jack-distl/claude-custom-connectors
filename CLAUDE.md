@@ -180,6 +180,8 @@ These issues have been hit and solved. Don't re-introduce them:
 
 14. **Claude's MCP connector URL needs `/mcp` suffix** — When adding a connector to Claude (Settings → Integrations), the URL must end with `/mcp` (e.g., `https://my-connector.up.railway.app/mcp`). Tell the user this explicitly.
 
+15. **Don't keep OAuth state only in memory** — Railway restarts every connector on each deploy. Registered clients used to live in an in-memory map, so after any deploy Claude's token refresh failed with `invalid_client` and people had to reconnect. The shared provider now signs client details into the client ID itself. Don't go back to an in-memory registry.
+
 ## Commands
 
 ```bash

@@ -54,6 +54,33 @@ function emailFromIdToken(idToken: unknown): string | undefined {
   }
 }
 
+/**
+ * Client metadata kept inside a signed client ID. Only what the SDK checks
+ * (redirect URIs, auth method) and what Claude shows, so the ID stays short.
+ */
+const SIGNED_CLIENT_FIELDS = [
+  "redirect_uris",
+  "token_endpoint_auth_method",
+  "grant_types",
+  "response_types",
+  "client_name",
+  "scope",
+] as const;
+
+/** The `exp` claim of a JWT access token, if it is one. */
+function jwtExpiry(token: string): number | undefined {
+  const parts = token.split(".");
+  if (parts.length !== 3) return undefined;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString()) as {
+      exp?: unknown;
+    };
+    return typeof payload.exp === "number" ? payload.exp : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** How long an in-flight authorization (user on the provider's consent screen) stays valid. */
 const PENDING_AUTH_TTL_MS = 10 * 60 * 1000;
 
@@ -70,10 +97,10 @@ interface PendingAuthorization {
 
 /**
  * OAuth provider that proxies authorization to an upstream provider (e.g., Meta, Google).
- * Handles dynamic client registration in-memory and forwards auth/token requests upstream.
+ * Handles dynamic client registration statelessly and forwards auth/token requests upstream.
  */
 export class ConnectorOAuthProvider implements OAuthServerProvider {
-  private clients = new Map<string, OAuthClientInformationFull>();
+  private readonly clientSigningKey: Buffer;
   private pendingAuthorizations = new Map<string, PendingAuthorization>();
   skipLocalPkceValidation = true;
   readonly issuer: string;
@@ -82,27 +109,72 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
   constructor(private config: OAuthProxyConfig) {
     this.issuer = issuerFor(config.serverUrl);
     this.callbackUrl = `${this.issuer}/oauth/callback`;
+    this.clientSigningKey = crypto
+      .createHash("sha256")
+      .update(`mcp-client-registration:${config.clientSecret}`)
+      .digest();
   }
 
+  private sign(value: string): string {
+    return crypto.createHmac("sha256", this.clientSigningKey).update(value).digest("base64url");
+  }
+
+  /**
+   * Registered clients live in their own client ID: the metadata, signed
+   * with a key derived from CLIENT_SECRET. Railway restarts the server on
+   * every deploy, and an in-memory registry lost Claude's client then, so its
+   * next token refresh failed with `invalid_client` and forced a reconnect.
+   * Confidential clients get a secret derived from the ID, which never
+   * expires (the SDK's default 30-day expiry also forced reconnects).
+   */
   get clientsStore(): OAuthRegisteredClientsStore {
     return {
-      getClient: async (clientId: string) => this.clients.get(clientId),
+      getClient: async (clientId: string) => {
+        const [payload, signature] = clientId.split(".");
+        if (!payload || !signature) return undefined;
+        const expected = Buffer.from(this.sign(payload));
+        const actual = Buffer.from(signature);
+        if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) {
+          return undefined;
+        }
+        try {
+          const metadata = JSON.parse(Buffer.from(payload, "base64url").toString());
+          return this.clientInfo(clientId, metadata);
+        } catch {
+          return undefined;
+        }
+      },
       registerClient: async (
         clientInput: Omit<
           OAuthClientInformationFull,
           "client_id" | "client_id_issued_at"
         >
       ) => {
-        const clientId = crypto.randomUUID();
-        const info = {
-          ...clientInput,
-          client_id: clientId,
+        const metadata: Record<string, unknown> = {
           client_id_issued_at: Math.floor(Date.now() / 1000),
-        } as OAuthClientInformationFull;
-        this.clients.set(clientId, info);
-        return info;
+        };
+        for (const field of SIGNED_CLIENT_FIELDS) {
+          if (clientInput[field] !== undefined) metadata[field] = clientInput[field];
+        }
+        const payload = Buffer.from(JSON.stringify(metadata)).toString("base64url");
+        return this.clientInfo(`${payload}.${this.sign(payload)}`, metadata);
       },
     };
+  }
+
+  private clientInfo(
+    clientId: string,
+    metadata: Record<string, unknown>
+  ): OAuthClientInformationFull {
+    const isPublic = metadata.token_endpoint_auth_method === "none";
+    return {
+      ...metadata,
+      client_id: clientId,
+      ...(!isPublic && {
+        client_secret: this.sign(`secret:${clientId}`),
+        client_secret_expires_at: 0,
+      }),
+    } as OAuthClientInformationFull;
   }
 
   async authorize(
@@ -365,12 +437,14 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
   async verifyAccessToken(token: string): Promise<AuthInfo> {
     // We trust the token from the upstream provider.
     // Actual validation happens when tools use it to call the API.
-    // Set expiresAt to 1 hour from now — requireBearerAuth rejects tokens without it.
+    // requireBearerAuth rejects tokens without expiresAt. For JWTs (e.g.
+    // WorkflowMax, Xero) use the real expiry, so an expired token gets a 401
+    // and Claude refreshes it; otherwise assume 1 hour from now.
     return {
       token,
       clientId: "claude",
       scopes: this.config.scopes,
-      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      expiresAt: jwtExpiry(token) ?? Math.floor(Date.now() / 1000) + 3600,
     };
   }
 }
