@@ -11,6 +11,7 @@ import type {
 } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import type { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/server/auth/clients.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import { AccessDeniedError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { OAuthProxyConfig } from "./types.js";
 
 /**
@@ -33,6 +34,23 @@ function parseTokenBody(body: string): Record<string, unknown> | null {
       parsed.expires_in = parsed.expires;
     }
     return Object.keys(parsed).length ? parsed : null;
+  }
+}
+
+/**
+ * Read the email claim from an OpenID `id_token`. The token comes straight
+ * from the provider's token endpoint over TLS, so its signature isn't checked
+ * (OpenID Connect Core §3.1.3.7 allows TLS validation in its place).
+ */
+function emailFromIdToken(idToken: unknown): string | undefined {
+  if (typeof idToken !== "string") return undefined;
+  try {
+    const payload = JSON.parse(
+      Buffer.from(idToken.split(".")[1] ?? "", "base64url").toString()
+    ) as Record<string, unknown>;
+    return typeof payload.email === "string" ? payload.email.toLowerCase() : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -95,7 +113,8 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
     const url = new URL(this.config.authorizeUrl);
     url.searchParams.set("client_id", this.config.clientId);
     url.searchParams.set("response_type", "code");
-    const scopes = (params.scopes ?? this.config.scopes).join(" ");
+    // The SDK passes [] when the client sends no `scope`; fall back to ours.
+    const scopes = (params.scopes?.length ? params.scopes : this.config.scopes).join(" ");
     url.searchParams.set("scope", scopes);
     if (this.config.proxyCallback) {
       // Send the provider back to us; handleCallback() forwards to Claude.
@@ -177,6 +196,7 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
     else if (redirectUri) params.set("redirect_uri", redirectUri);
 
     const data = await this.postToTokenEndpoint(params, "Token exchange");
+    await this.assertAllowedUser(data);
 
     // Upgrade the short-lived token to a long-lived (~60 day) one so the
     // session survives far past the default ~1-2h, then hand the long-lived
@@ -213,7 +233,46 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
     if (scopes?.length) params.set("scope", scopes.join(" "));
 
     const data = await this.postToTokenEndpoint(params, "Token refresh");
+    // Refresh tokens only ever go to people who passed the sign-in check, but
+    // re-check whenever a fresh id_token names someone.
+    if (emailFromIdToken(data.id_token)) await this.assertAllowedUser(data);
     return this.toOAuthTokens(data);
+  }
+
+  /**
+   * With `allowedEmails` set, refuse anyone whose email isn't on the list.
+   * Throws an OAuth `access_denied` so Claude shows a failed sign-in rather
+   * than a server error.
+   */
+  private async assertAllowedUser(data: Record<string, unknown>): Promise<void> {
+    const allowed = this.config.allowedEmails;
+    if (!allowed) return;
+    const email =
+      emailFromIdToken(data.id_token) ??
+      (await this.emailFromUserinfo(data.access_token as string));
+    if (email && allowed.some((a) => a.trim().toLowerCase() === email)) return;
+    console.error(
+      `[OAuth] Sign-in refused for ${email ?? "a user whose email couldn't be read"}: not in allowed emails`
+    );
+    throw new AccessDeniedError("This connector is restricted to specific users.");
+  }
+
+  private async emailFromUserinfo(accessToken: string): Promise<string | undefined> {
+    if (!this.config.userinfoUrl) return undefined;
+    try {
+      const response = await fetch(this.config.userinfoUrl, {
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+      });
+      if (!response.ok) {
+        console.error(`[OAuth] Userinfo failed (${response.status}): ${await response.text()}`);
+        return undefined;
+      }
+      const body = (await response.json()) as Record<string, unknown>;
+      return typeof body.email === "string" ? body.email.toLowerCase() : undefined;
+    } catch (err) {
+      console.error(`[OAuth] Userinfo request failed: ${err instanceof Error ? err.message : err}`);
+      return undefined;
+    }
   }
 
   /**

@@ -146,6 +146,7 @@ When asked to generate a skill for a connector:
 - **Errors return `isError: true`** — use the `ConnectorError.toToolResult()` pattern.
 - **`SERVER_URL` must be set after deployment** — generate a Railway domain first, then set `SERVER_URL` to that domain. OAuth callbacks break without it.
 - **Connectors are always deployed to Railway** — they're accessed via Claude Desktop/claude.ai, not run locally.
+- **Locking a connector to specific people** — set `allowedEmails` in the `oauth` config (request the `openid` and `email` scopes, and set `userinfoUrl` as a fallback). Sign-in is refused for anyone else and fails closed if the list is empty. The Xero connector does this via the `ALLOWED_EMAILS` env var.
 
 ## Common Pitfalls
 

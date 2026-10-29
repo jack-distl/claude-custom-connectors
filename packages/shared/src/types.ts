@@ -33,6 +33,16 @@ export interface OAuthProxyConfig {
    * URI in the provider's OAuth app.
    */
   proxyCallback?: boolean;
+  /**
+   * Restrict sign-in to these email addresses (case-insensitive). The email
+   * is read from the OpenID `id_token` in the token response (falling back to
+   * `userinfoUrl`), so the `openid` and `email` scopes must be requested.
+   * When set, sign-in fails closed: an empty list, or no email found, refuses
+   * everyone.
+   */
+  allowedEmails?: string[];
+  /** OpenID userinfo endpoint, used by `allowedEmails` when the id_token carries no email. */
+  userinfoUrl?: string;
 }
 
 export interface ConnectorConfig {
