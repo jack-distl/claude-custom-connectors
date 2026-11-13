@@ -41,7 +41,13 @@ export interface OAuthProxyConfig {
    * everyone.
    */
   allowedEmails?: string[];
-  /** OpenID userinfo endpoint, used by `allowedEmails` when the id_token carries no email. */
+  /**
+   * Restrict sign-in to emails at these domains (e.g. "distl.com.au"),
+   * case-insensitive, exact domain match. Combines with `allowedEmails`:
+   * matching either lets someone in. When either is set, sign-in fails closed.
+   */
+  allowedEmailDomains?: string[];
+  /** OpenID userinfo endpoint, used by the email checks when the id_token carries no email. */
   userinfoUrl?: string;
 }
 

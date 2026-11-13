@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ConnectorError } from "@custom-connectors/shared";
 import * as api from "./api.js";
+import { authorise, describeAccess, groupForPath } from "./access.js";
 
 function toolResult(data: unknown) {
   return {
@@ -19,31 +20,33 @@ function errorResult(error: unknown) {
   };
 }
 
-/**
- * Extract the OAuth access token from the MCP transport layer.
- * The token is provided automatically by Claude's integration — it is NOT
- * a tool parameter. It arrives via extra.authInfo.token on every request.
- */
-function getAccessToken(extra: { authInfo?: { token?: string } }): string {
-  const token = extra.authInfo?.token;
-  if (!token) {
-    throw new ConnectorError(
-      "No access token found. Please reconnect to authenticate.",
-      "AUTH_REQUIRED",
-      401
-    );
-  }
-  return token;
-}
-
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
 const xeroId = z.string().uuid();
 
 /**
  * Every tool is read-only. Payroll tools hit Xero Payroll AU; the rest hit
- * the Xero Accounting API.
+ * the Xero Accounting API. Every handler gets its token from authorise(),
+ * which runs the access checks in access.ts first. Never read
+ * extra.authInfo.token directly here.
  */
 export function registerTools(server: McpServer) {
+  // =========================================================================
+  // ACCESS
+  // =========================================================================
+
+  server.tool(
+    "my_access",
+    "Show who you're signed in to Xero as and which parts of this connector you can use (accounting, reports, leave, payroll). Use this when a tool says access is refused, or to check your access.",
+    {},
+    async (_params, extra) => {
+      try {
+        return toolResult(await describeAccess(extra));
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
   // =========================================================================
   // ORGANISATION
   // =========================================================================
@@ -54,7 +57,7 @@ export function registerTools(server: McpServer) {
     {},
     async (_params, extra) => {
       try {
-        return toolResult(await api.getOrganisation(getAccessToken(extra)));
+        return toolResult(await api.getOrganisation(await authorise(extra, "get_organisation")));
       } catch (error) {
         return errorResult(error);
       }
@@ -76,7 +79,7 @@ export function registerTools(server: McpServer) {
     },
     async (params, extra) => {
       try {
-        return toolResult(await api.listEmployees(getAccessToken(extra), params.status));
+        return toolResult(await api.listEmployees(await authorise(extra, "list_employees"), params.status));
       } catch (error) {
         return errorResult(error);
       }
@@ -91,7 +94,7 @@ export function registerTools(server: McpServer) {
     },
     async (params, extra) => {
       try {
-        return toolResult(await api.getEmployee(getAccessToken(extra), params.employee_id));
+        return toolResult(await api.getEmployee(await authorise(extra, "get_employee"), params.employee_id));
       } catch (error) {
         return errorResult(error);
       }
@@ -104,7 +107,7 @@ export function registerTools(server: McpServer) {
     {},
     async (_params, extra) => {
       try {
-        return toolResult(await api.listLeaveTypes(getAccessToken(extra)));
+        return toolResult(await api.listLeaveTypes(await authorise(extra, "list_leave_types")));
       } catch (error) {
         return errorResult(error);
       }
@@ -125,7 +128,7 @@ export function registerTools(server: McpServer) {
     },
     async (params, extra) => {
       try {
-        const result = await api.listLeaveApplications(getAccessToken(extra), {
+        const result = await api.listLeaveApplications(await authorise(extra, "list_leave_applications"), {
           from: params.from,
           to: params.to,
           employeeId: params.employee_id,
@@ -159,7 +162,7 @@ export function registerTools(server: McpServer) {
         if (params.from > params.to) {
           throw new ConnectorError("from must be on or before to.", "INVALID_DATES", 400);
         }
-        const result = await api.getLeaveByDay(getAccessToken(extra), {
+        const result = await api.getLeaveByDay(await authorise(extra, "get_leave_by_day"), {
           from: params.from,
           to: params.to,
           includeRequested: params.include_requested,
@@ -187,7 +190,7 @@ export function registerTools(server: McpServer) {
     },
     async (params, extra) => {
       try {
-        const result = await api.listPayrollTimesheets(getAccessToken(extra), {
+        const result = await api.listPayrollTimesheets(await authorise(extra, "list_payroll_timesheets"), {
           from: params.from,
           to: params.to,
           employeeId: params.employee_id,
@@ -207,7 +210,7 @@ export function registerTools(server: McpServer) {
     },
     async (params, extra) => {
       try {
-        return toolResult(await api.listPayRuns(getAccessToken(extra), params.limit));
+        return toolResult(await api.listPayRuns(await authorise(extra, "list_pay_runs"), params.limit));
       } catch (error) {
         return errorResult(error);
       }
@@ -222,7 +225,7 @@ export function registerTools(server: McpServer) {
     },
     async (params, extra) => {
       try {
-        return toolResult(await api.getPayRun(getAccessToken(extra), params.pay_run_id));
+        return toolResult(await api.getPayRun(await authorise(extra, "get_pay_run"), params.pay_run_id));
       } catch (error) {
         return errorResult(error);
       }
@@ -237,7 +240,7 @@ export function registerTools(server: McpServer) {
     },
     async (params, extra) => {
       try {
-        return toolResult(await api.getPayslip(getAccessToken(extra), params.payslip_id));
+        return toolResult(await api.getPayslip(await authorise(extra, "get_payslip"), params.payslip_id));
       } catch (error) {
         return errorResult(error);
       }
@@ -262,7 +265,7 @@ export function registerTools(server: McpServer) {
     },
     async (params, extra) => {
       try {
-        const result = await api.listAccounts(getAccessToken(extra), {
+        const result = await api.listAccounts(await authorise(extra, "list_accounts"), {
           accountClass: params.class,
           type: params.type,
           search: params.search,
@@ -285,7 +288,7 @@ export function registerTools(server: McpServer) {
     },
     async (params, extra) => {
       try {
-        const result = await api.listContacts(getAccessToken(extra), {
+        const result = await api.listContacts(await authorise(extra, "list_contacts"), {
           search: params.search,
           suppliersOnly: params.suppliers_only,
           page: params.page,
@@ -321,7 +324,7 @@ export function registerTools(server: McpServer) {
     },
     async (params, extra) => {
       try {
-        const result = await api.listInvoices(getAccessToken(extra), {
+        const result = await api.listInvoices(await authorise(extra, "list_invoices"), {
           type: params.type,
           from: params.from,
           to: params.to,
@@ -345,7 +348,7 @@ export function registerTools(server: McpServer) {
     },
     async (params, extra) => {
       try {
-        return toolResult(await api.getInvoice(getAccessToken(extra), params.invoice_id));
+        return toolResult(await api.getInvoice(await authorise(extra, "get_invoice"), params.invoice_id));
       } catch (error) {
         return errorResult(error);
       }
@@ -380,7 +383,7 @@ export function registerTools(server: McpServer) {
     },
     async (params, extra) => {
       try {
-        const result = await api.listBankTransactions(getAccessToken(extra), {
+        const result = await api.listBankTransactions(await authorise(extra, "list_bank_transactions"), {
           type: params.type,
           from: params.from,
           to: params.to,
@@ -403,7 +406,7 @@ export function registerTools(server: McpServer) {
     },
     async (params, extra) => {
       try {
-        return toolResult(await api.listRepeatingInvoices(getAccessToken(extra), params.type));
+        return toolResult(await api.listRepeatingInvoices(await authorise(extra, "list_repeating_invoices"), params.type));
       } catch (error) {
         return errorResult(error);
       }
@@ -423,7 +426,7 @@ export function registerTools(server: McpServer) {
     },
     async (params, extra) => {
       try {
-        const result = await api.softwareSpendSummary(getAccessToken(extra), {
+        const result = await api.softwareSpendSummary(await authorise(extra, "software_spend_summary"), {
           accountCodes: params.account_codes,
           from: params.from,
           to: params.to,
@@ -461,7 +464,7 @@ export function registerTools(server: McpServer) {
             400
           );
         }
-        const result = await api.getReport(getAccessToken(extra), params.report, {
+        const result = await api.getReport(await authorise(extra, "get_report"), params.report, {
           fromDate: params.from,
           toDate: params.to,
           date: params.date,
@@ -491,7 +494,7 @@ export function registerTools(server: McpServer) {
     },
     async (params, extra) => {
       try {
-        const result = await api.rawGet(getAccessToken(extra), params.api, params.path, params.query);
+        const result = await api.rawGet(await authorise(extra, "xero_api_get", groupForPath(params.api, params.path)), params.api, params.path, params.query);
         return toolResult(result);
       } catch (error) {
         return errorResult(error);
