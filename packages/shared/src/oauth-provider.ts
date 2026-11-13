@@ -55,6 +55,23 @@ function emailFromIdToken(idToken: unknown): string | undefined {
 }
 
 /**
+ * True when `email` is on `allowedEmails` or at one of `allowedDomains`
+ * (both case-insensitive). Empty or missing lists match nobody.
+ */
+export function emailIsAllowed(
+  email: string,
+  allowedEmails: string[] = [],
+  allowedDomains: string[] = []
+): boolean {
+  const e = email.trim().toLowerCase();
+  if (allowedEmails.some((a) => a.trim().toLowerCase() === e)) return true;
+  const at = e.lastIndexOf("@");
+  if (at < 1) return false;
+  const domain = e.slice(at + 1);
+  return allowedDomains.some((d) => d.trim().toLowerCase().replace(/^@/, "") === domain);
+}
+
+/**
  * Client metadata kept inside a signed client ID. Only what the SDK checks
  * (redirect URIs, auth method) and what Claude shows, so the ID stays short.
  */
@@ -312,17 +329,18 @@ export class ConnectorOAuthProvider implements OAuthServerProvider {
   }
 
   /**
-   * With `allowedEmails` set, refuse anyone whose email isn't on the list.
-   * Throws an OAuth `access_denied` so Claude shows a failed sign-in rather
-   * than a server error.
+   * With `allowedEmails` or `allowedEmailDomains` set, refuse anyone whose
+   * email matches neither. Throws an OAuth `access_denied` so Claude shows a
+   * failed sign-in rather than a server error.
    */
   private async assertAllowedUser(data: Record<string, unknown>): Promise<void> {
     const allowed = this.config.allowedEmails;
-    if (!allowed) return;
+    const domains = this.config.allowedEmailDomains;
+    if (!allowed && !domains) return;
     const email =
       emailFromIdToken(data.id_token) ??
       (await this.emailFromUserinfo(data.access_token as string));
-    if (email && allowed.some((a) => a.trim().toLowerCase() === email)) return;
+    if (email && emailIsAllowed(email, allowed, domains)) return;
     console.error(
       `[OAuth] Sign-in refused for ${email ?? "a user whose email couldn't be read"}: not in allowed emails`
     );

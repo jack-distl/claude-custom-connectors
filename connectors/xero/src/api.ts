@@ -16,56 +16,21 @@ const DAY_MS = 86_400_000;
 // Tenant (organisation) ID
 // ---------------------------------------------------------------------------
 
-interface XeroConnection {
-  tenantId: string;
-  tenantType: string;
-  tenantName: string;
-}
-
-const tenantCache = new Map<string, string>();
-
 /**
  * Every Xero API call needs a `Xero-Tenant-Id` header naming the organisation.
- * Uses XERO_TENANT_ID if set, otherwise looks up the organisations this token
- * can reach via GET /connections (cached per token).
+ * It's always XERO_TENANT_ID: the connector is locked to one organisation and
+ * access.ts checks each caller's login is connected to it before any call.
  */
-async function getTenantId(accessToken: string): Promise<string> {
-  if (process.env.XERO_TENANT_ID) return process.env.XERO_TENANT_ID;
-  const cached = tenantCache.get(accessToken);
-  if (cached) return cached;
-
-  const response = await fetch(`${API_ROOT}/connections`, {
-    headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
-  });
-  if (!response.ok) {
-    const body = await response.text();
-    console.error(`[Xero] GET /connections failed (${response.status}): ${body}`);
+async function getTenantId(_accessToken: string): Promise<string> {
+  const tenantId = process.env.XERO_TENANT_ID?.trim();
+  if (!tenantId) {
     throw new ConnectorError(
-      `Couldn't look up the connected Xero organisation (${response.status}): ${body}`,
-      response.status === 401 ? "AUTH_ERROR" : "API_ERROR",
-      response.status
-    );
-  }
-
-  const orgs = ((await response.json()) as XeroConnection[]).filter(
-    (c) => c.tenantType === "ORGANISATION"
-  );
-  if (orgs.length !== 1) {
-    const names = orgs.map((o) => `${o.tenantName} (${o.tenantId})`).join(", ");
-    throw new ConnectorError(
-      orgs.length === 0
-        ? "No Xero organisation is connected. Reconnect the connector and pick an organisation."
-        : `More than one Xero organisation is connected: ${names}. Set XERO_TENANT_ID in Railway to the one to use.`,
+      "XERO_TENANT_ID isn't set in Railway, so the connector won't call Xero.",
       "TENANT_REQUIRED",
-      400
+      500
     );
   }
-
-  // Access tokens rotate every 30 minutes, so keep the cache from growing.
-  if (tenantCache.size > 100) tenantCache.clear();
-  tenantCache.set(accessToken, orgs[0].tenantId);
-  console.log(`[Xero] Using organisation ${orgs[0].tenantName} (${orgs[0].tenantId})`);
-  return orgs[0].tenantId;
+  return tenantId;
 }
 
 // ---------------------------------------------------------------------------
@@ -1119,7 +1084,7 @@ export async function rawGet(
   path: string,
   query: Record<string, string> = {}
 ) {
-  if (!/^\/[A-Za-z0-9/_.\-]*$/.test(path) || path.includes("..")) {
+  if (!/^\/[A-Za-z0-9/_.\-]*$/.test(path) || path.includes("..") || /\/\.?\//.test(path)) {
     throw new ConnectorError(
       `Invalid path "${path}". Use a plain endpoint path like /Payments or /Employees/{id}, with query parameters passed separately.`,
       "INVALID_PATH",

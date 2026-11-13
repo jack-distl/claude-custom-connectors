@@ -5,6 +5,7 @@ export {
   buildAuthorizationUrl,
 } from "./oauth-helpers.js";
 export { apiRequest } from "./api-client.js";
+export { emailIsAllowed } from "./oauth-provider.js";
 export {
   ConnectorError,
   AuthError,
