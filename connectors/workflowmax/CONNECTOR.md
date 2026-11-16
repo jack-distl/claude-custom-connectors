@@ -32,8 +32,8 @@ Connects Claude to [WorkflowMax by BlueRock](https://www.workflowmax.com/) — a
 |------|-------------|
 | `list_contacts` | List contacts, optionally filtered by client |
 | `get_contact` | Get contact details by ID |
-| `create_contact` | Create a contact (name required) |
-| `update_contact` | Update contact fields |
+| `create_contact` | Create a contact and link it to a client (first_name required, last_name separate; position/primary set on the client link) |
+| `update_contact` | Update contact fields. Position, primary and include-in-emails need client_id |
 
 ### Jobs
 | Tool | Description |
@@ -42,6 +42,7 @@ Connects Claude to [WorkflowMax by BlueRock](https://www.workflowmax.com/) — a
 | `get_job` | Get job details including tasks, costs, timesheets |
 | `create_job` | Create a new job (name + client_id required) |
 | `update_job` | Update job fields |
+| `list_job_categories` | List active job categories (gives the UUID for category_id) |
 | `delete_job` | Delete a job |
 
 ### Timesheets
@@ -54,16 +55,21 @@ Connects Claude to [WorkflowMax by BlueRock](https://www.workflowmax.com/) — a
 | `delete_timesheet` | Delete a timesheet entry |
 
 ### Invoices (read-only)
+The WorkflowMax v2 API has no endpoint to create invoices, so invoicing still happens in WorkflowMax itself.
+
 | Tool | Description |
 |------|-------------|
 | `list_invoices` | List invoices by status, client, or date range |
 | `get_invoice` | Get invoice details by ID |
 
-### Quotes (read-only)
+### Quotes
 | Tool | Description |
 |------|-------------|
 | `list_quotes` | List quotes by client or state |
 | `get_quote` | Get quote details by ID |
+| `create_quote` | Create a blank quote or estimate for a client |
+| `add_quote_task` | Add a task line to a draft quote, with an optional billable_rate |
+| `add_quote_cost` | Add a cost line to a draft quote |
 
 ### Leads
 | Tool | Description |
@@ -93,6 +99,16 @@ Connects Claude to [WorkflowMax by BlueRock](https://www.workflowmax.com/) — a
 | `create_task` | Create a task (name required) |
 | `update_task` | Update task fields |
 | `delete_task` | Delete a task |
+
+### Job Tasks
+| Tool | Description |
+|------|-------------|
+| `list_job_tasks` | List the tasks on a job (gives the job-task UUID for timesheets) |
+| `create_job_task` | Add a task to a job. `custom_billable_rate` sets a one-off hourly rate for that task on that job |
+| `update_job_task` | Update a job task, including setting or removing the custom billable rate |
+| `delete_job_task` | Remove a task from a job |
+
+`custom_billable_rate` only takes effect when the org's task invoice rate is set to Task (not Staff) in WorkflowMax settings.
 
 ## Environment Variables
 | Variable | Description | Where to get it |

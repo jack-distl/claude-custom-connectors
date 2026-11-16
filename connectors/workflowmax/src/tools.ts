@@ -216,28 +216,41 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "create_contact",
-    "Create a new contact in WorkflowMax, optionally linked to a client.",
+    "Create a new contact in WorkflowMax and link it to a client. Give the first and last name separately. position, is_primary and include_in_emails apply to the client link, so they need client_id.",
     {
-      name: z.string().describe("Contact name (required)"),
-      client_id: z.string().optional().describe("Client ID to associate the contact with"),
+      first_name: z.string().describe("Contact first name (required)"),
+      last_name: z.string().optional().describe("Contact last name"),
+      client_id: z.string().optional().describe("Client UUID to link the contact to. Strongly recommended, otherwise the contact isn't attached to any client."),
       email: z.string().optional().describe("Contact email address"),
       phone: z.string().optional().describe("Contact phone number"),
       mobile: z.string().optional().describe("Contact mobile number"),
-      position: z.string().optional().describe("Contact's position or job title"),
+      position: z.string().optional().describe("Contact's position or job title at the client"),
       is_primary: z.boolean().optional().describe("Whether this is the primary contact for the client"),
+      include_in_emails: z.boolean().optional().describe("Whether to include this contact on emails to the client"),
     },
     async (params, extra) => {
       try {
         const token = getAccessToken(extra);
-        const result = await api.createContact(token, {
-          name: params.name,
-          clientId: params.client_id,
-          email: params.email,
-          phone: params.phone,
-          mobile: params.mobile,
-          position: params.position,
-          isPrimary: params.is_primary,
-        });
+        if (!params.client_id && (params.position !== undefined || params.is_primary !== undefined || params.include_in_emails !== undefined)) {
+          throw new ConnectorError(
+            "position, is_primary and include_in_emails are set on the client link, so client_id is required when you use them.",
+            "VALIDATION_ERROR",
+            400
+          );
+        }
+        const data: api.CreateContactRequest = { firstName: params.first_name };
+        if (params.last_name !== undefined) data.lastName = params.last_name;
+        if (params.email !== undefined) data.email = params.email;
+        if (params.phone !== undefined) data.phone = params.phone;
+        if (params.mobile !== undefined) data.mobile = params.mobile;
+        if (params.client_id) {
+          const link: api.ContactClientLink = { uuid: params.client_id };
+          if (params.position !== undefined) link.position = params.position;
+          if (params.is_primary !== undefined) link.primaryContact = params.is_primary;
+          if (params.include_in_emails !== undefined) link.includeInEmails = params.include_in_emails;
+          data.clients = [link];
+        }
+        const result = await api.createContact(token, data);
         return toolResult(result);
       } catch (error) {
         return errorResult(error);
@@ -247,27 +260,52 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "update_contact",
-    "Update an existing contact. Provide only the fields you want to change.",
+    "Update an existing contact. Provide only the fields you want to change. position, is_primary and include_in_emails are set per client, so they need client_id.",
     {
       contact_id: z.string().describe("The ID of the contact to update"),
-      name: z.string().optional().describe("Contact name"),
+      first_name: z.string().optional().describe("Contact first name"),
+      last_name: z.string().optional().describe("Contact last name"),
       email: z.string().optional().describe("Contact email address"),
       phone: z.string().optional().describe("Contact phone number"),
       mobile: z.string().optional().describe("Contact mobile number"),
-      position: z.string().optional().describe("Contact's position or job title"),
-      is_primary: z.boolean().optional().describe("Whether this is the primary contact"),
+      client_id: z.string().optional().describe("Client UUID. Required when changing position, is_primary or include_in_emails."),
+      position: z.string().optional().describe("Contact's position or job title at the client"),
+      is_primary: z.boolean().optional().describe("Whether this is the primary contact for the client"),
+      include_in_emails: z.boolean().optional().describe("Whether to include this contact on emails to the client"),
     },
     async (params, extra) => {
       try {
         const token = getAccessToken(extra);
-        const data: Partial<api.WfmContact> = {};
-        if (params.name !== undefined) data.name = params.name;
+        const linkData: api.UpdateContactClientLinkRequest = {};
+        if (params.position !== undefined) linkData.position = params.position;
+        if (params.is_primary !== undefined) linkData.primaryContact = params.is_primary;
+        if (params.include_in_emails !== undefined) linkData.includeInEmails = params.include_in_emails;
+        const hasLinkChanges = Object.keys(linkData).length > 0;
+        if (hasLinkChanges && !params.client_id) {
+          throw new ConnectorError(
+            "position, is_primary and include_in_emails are set per client, so client_id is required when you change them.",
+            "VALIDATION_ERROR",
+            400
+          );
+        }
+
+        const data: api.UpdateContactRequest = {};
+        if (params.first_name !== undefined) data.firstName = params.first_name;
+        if (params.last_name !== undefined) data.lastName = params.last_name;
         if (params.email !== undefined) data.email = params.email;
         if (params.phone !== undefined) data.phone = params.phone;
         if (params.mobile !== undefined) data.mobile = params.mobile;
-        if (params.position !== undefined) data.position = params.position;
-        if (params.is_primary !== undefined) data.isPrimary = params.is_primary;
-        const result = await api.updateContact(token, params.contact_id, data);
+
+        const result: Record<string, unknown> = {};
+        if (Object.keys(data).length > 0) {
+          result.contact = await api.updateContact(token, params.contact_id, data);
+        }
+        if (hasLinkChanges) {
+          result.clientLink = await api.updateContactClientLink(token, params.client_id!, params.contact_id, linkData);
+        }
+        if (Object.keys(result).length === 0) {
+          return toolResult({ message: "Nothing to update. Provide at least one field to change." });
+        }
         return toolResult(result);
       } catch (error) {
         return errorResult(error);
@@ -381,7 +419,7 @@ export function registerTools(server: McpServer) {
       start_date: z.string().optional().describe("Start date (YYYY-MM-DD)"),
       due_date: z.string().optional().describe("Due date (YYYY-MM-DD)"),
       budget: z.number().optional().describe("Job budget amount"),
-      category_id: z.string().optional().describe("Job category ID"),
+      category_id: z.string().optional().describe("Job category UUID. Get it from list_job_categories."),
       template_id: z.string().optional().describe("Job template ID to use"),
       priority: z.string().optional().describe('Job priority. Accepted values: "Normal", "High", "Low". Defaults to "Normal".'),
       status_id: z.string().optional().describe("UUID of the job status (e.g. the UUID for 'Planned' or 'In Progress'). If omitted, the connector auto-fetches the first available status from the organisation."),
@@ -410,7 +448,7 @@ export function registerTools(server: McpServer) {
           startDate: params.start_date,
           dueDate: params.due_date,
           budget: params.budget,
-          categoryuuid: params.category_id,
+          jobCategoryUUID: params.category_id,
           templateuuid: params.template_id,
           priority: params.priority ?? "Normal",
           statusuuid,
@@ -433,7 +471,7 @@ export function registerTools(server: McpServer) {
       start_date: z.string().optional().describe("Start date (YYYY-MM-DD)"),
       due_date: z.string().optional().describe("Due date (YYYY-MM-DD)"),
       budget: z.number().optional().describe("Job budget amount"),
-      category_id: z.string().optional().describe("Job category UUID"),
+      category_id: z.string().optional().describe("Job category UUID. Get it from list_job_categories."),
       job_manager_id: z.string().optional().describe("UUID of the staff member managing the job"),
       client_manager_id: z.string().optional().describe("UUID of the staff member managing the client relationship"),
       staff: z.array(z.object({
@@ -451,11 +489,26 @@ export function registerTools(server: McpServer) {
         if (params.start_date !== undefined) data.startDate = params.start_date;
         if (params.due_date !== undefined) data.dueDate = params.due_date;
         if (params.budget !== undefined) data.budget = params.budget;
-        if (params.category_id !== undefined) data.categoryuuid = params.category_id;
+        if (params.category_id !== undefined) data.jobCategoryUUID = params.category_id;
         if (params.job_manager_id !== undefined) data.jobmanageruuid = params.job_manager_id;
         if (params.client_manager_id !== undefined) data.clientmanageruuid = params.client_manager_id;
         if (params.staff !== undefined) data.staff = params.staff;
         const result = await api.updateJob(token, params.job_id, data);
+        return toolResult(result);
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  server.tool(
+    "list_job_categories",
+    "List the active job categories in WorkflowMax. Use this to find the category UUID to pass as category_id on create_job or update_job.",
+    {},
+    async (_params, extra) => {
+      try {
+        const token = getAccessToken(extra);
+        const result = await api.listJobCategories(token);
         return toolResult(result);
       } catch (error) {
         return errorResult(error);
@@ -607,7 +660,7 @@ export function registerTools(server: McpServer) {
   );
 
   // =========================================================================
-  // INVOICES (read-only)
+  // INVOICES (read-only: the WorkflowMax v2 API has no endpoint to create invoices)
   // =========================================================================
 
   server.tool(
@@ -657,7 +710,7 @@ export function registerTools(server: McpServer) {
   );
 
   // =========================================================================
-  // QUOTES (read-only)
+  // QUOTES
   // =========================================================================
 
   server.tool(
@@ -695,6 +748,119 @@ export function registerTools(server: McpServer) {
       try {
         const token = getAccessToken(extra);
         const result = await api.getQuote(token, params.quote_id);
+        return toolResult(result);
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  server.tool(
+    "create_quote",
+    "Create a new blank quote (or estimate) for a client in WorkflowMax. Leave status as draft if you want to add lines afterwards with add_quote_task and add_quote_cost, because lines can only be added to draft quotes.",
+    {
+      client_id: z.string().describe("Client UUID the quote is for (required)"),
+      name: z.string().describe("Quote name (required)"),
+      contact_id: z.string().optional().describe("UUID of a contact at that client"),
+      type: z.enum(["quote", "estimate"]).optional().describe("Document type. Defaults to quote."),
+      description: z.string().optional().describe("Quote description"),
+      budget: z.number().optional().describe("Quote budget"),
+      valid_from: z.string().optional().describe("Valid from date (YYYY-MM-DD)"),
+      valid_to: z.string().optional().describe("Valid to date (YYYY-MM-DD)"),
+      status: z.enum(["draft", "issued"]).optional().describe("Quote status. Use draft if you still need to add lines."),
+      fixed_price: z.boolean().optional().describe("true for fixed price mode, false for calculated. Defaults to the org's quote setting."),
+      job_template_id: z.string().optional().describe("UUID of a job template to apply to the quote"),
+      salesperson_id: z.string().optional().describe("Staff UUID of the salesperson"),
+    },
+    async (params, extra) => {
+      try {
+        const token = getAccessToken(extra);
+        const data: api.CreateQuoteRequest = {
+          clientUUID: params.client_id,
+          quoteName: params.name,
+        };
+        if (params.contact_id !== undefined) data.contactUUID = params.contact_id;
+        if (params.type !== undefined) data.type = params.type;
+        if (params.description !== undefined) data.description = params.description;
+        if (params.budget !== undefined) data.budget = params.budget;
+        if (params.valid_from !== undefined) data.validFrom = params.valid_from;
+        if (params.valid_to !== undefined) data.validTo = params.valid_to;
+        if (params.status !== undefined) data.status = params.status;
+        if (params.fixed_price !== undefined) data.fixedPrice = params.fixed_price;
+        if (params.job_template_id !== undefined) data.jobTemplateUUID = params.job_template_id;
+        if (params.salesperson_id !== undefined) data.salePersonUUID = params.salesperson_id;
+        const result = await api.createQuote(token, data);
+        return toolResult(result);
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  server.tool(
+    "add_quote_task",
+    "Add a task line (labour) to a draft quote. Use billable_rate to set an hourly rate for this quote only, or fixed_price_amount when the quote is in fixed price mode.",
+    {
+      quote_id: z.string().describe("Quote UUID (required). Must be a draft quote."),
+      task_uuid: z.string().describe("Global task template UUID (from list_tasks) (required)"),
+      estimated_minutes: z.number().optional().describe("Estimated time in minutes"),
+      label: z.string().optional().describe("Label for the line"),
+      description: z.string().optional().describe("Line description"),
+      billable: z.boolean().optional().describe("Whether the line is billable. Defaults to true."),
+      optional: z.boolean().optional().describe("Whether the line is optional. Defaults to false."),
+      billable_rate: z.number().optional().describe("Hourly billable rate for this task on this quote, e.g. 200"),
+      fixed_price_amount: z.number().optional().describe("Fixed price for this line. Only used when the quote is in fixed price mode."),
+    },
+    async (params, extra) => {
+      try {
+        const token = getAccessToken(extra);
+        const data: api.CreateQuoteTaskRequest = { taskUUID: params.task_uuid };
+        if (params.estimated_minutes !== undefined) data.estimatedMinutes = params.estimated_minutes;
+        if (params.label !== undefined) data.label = params.label;
+        if (params.description !== undefined) data.description = params.description;
+        if (params.billable !== undefined) data.billable = params.billable;
+        if (params.optional !== undefined) data.optional = params.optional;
+        if (params.billable_rate !== undefined) data.billableRate = params.billable_rate;
+        if (params.fixed_price_amount !== undefined) data.fixedPriceAmount = params.fixed_price_amount;
+        const result = await api.createQuoteTask(token, params.quote_id, data);
+        return toolResult(result);
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  server.tool(
+    "add_quote_cost",
+    "Add a cost line (materials, subcontractor, ad spend and so on) to a draft quote. Give either cost_name or cost_id.",
+    {
+      quote_id: z.string().describe("Quote UUID (required). Must be a draft quote."),
+      quantity: z.number().describe("Quantity (required)"),
+      cost_name: z.string().optional().describe("Name of the cost line. Needs unit_cost when cost_id isn't given."),
+      cost_id: z.string().optional().describe("UUID of a cost from the cost admin"),
+      unit_cost: z.number().optional().describe("Unit cost (what it costs Distl)"),
+      unit_price: z.number().optional().describe("Unit price (what the client pays)"),
+      billable: z.boolean().optional().describe("Whether the line is billable"),
+      optional: z.boolean().optional().describe("Whether the line is optional"),
+      note: z.string().optional().describe("Note for the line"),
+      fixed_price_amount: z.number().optional().describe("Fixed price for this line. Only used when the quote is in fixed price mode."),
+    },
+    async (params, extra) => {
+      try {
+        const token = getAccessToken(extra);
+        if (!params.cost_name && !params.cost_id) {
+          throw new ConnectorError("Give either cost_name or cost_id.", "VALIDATION_ERROR", 400);
+        }
+        const data: api.CreateQuoteCostRequest = { quantity: params.quantity };
+        if (params.cost_name !== undefined) data.costName = params.cost_name;
+        if (params.cost_id !== undefined) data.costUUID = params.cost_id;
+        if (params.unit_cost !== undefined) data.unitCost = params.unit_cost;
+        if (params.unit_price !== undefined) data.unitPrice = params.unit_price;
+        if (params.billable !== undefined) data.billable = params.billable;
+        if (params.optional !== undefined) data.optional = params.optional;
+        if (params.note !== undefined) data.note = params.note;
+        if (params.fixed_price_amount !== undefined) data.fixedPriceAmount = params.fixed_price_amount;
+        const result = await api.createQuoteCost(token, params.quote_id, data);
         return toolResult(result);
       } catch (error) {
         return errorResult(error);
@@ -1057,7 +1223,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "create_job_task",
-    "Add a task to a job. Requires the global task template UUID and the job ID. Staff are assigned as an array with UUID and allocated time.",
+    "Add a task to a job. Requires the global task template UUID and the job ID. Staff are assigned as an array with UUID and allocated time. Use custom_billable_rate to set a one-off hourly rate for this task on this job (e.g. 200 for a $200/hr job) so the job's billing matches the invoice.",
     {
       job_id: z.string().describe("Job UUID or job number to add the task to (required)"),
       task_uuid: z.string().describe("Global task template UUID to add to the job (required)"),
@@ -1067,6 +1233,8 @@ export function registerTools(server: McpServer) {
         allocatedTime: z.number().optional().describe("Allocated time in minutes for this staff member"),
       })).optional().describe("Staff members to assign to this task"),
       label: z.string().optional().describe("Label for the task assignment (e.g. 'Account Manager', 'SEO Specialist')"),
+      billable: z.boolean().optional().describe("Whether the task is billable. Defaults to true."),
+      custom_billable_rate: z.number().positive().optional().describe("Hourly billable rate for this task on this job only, e.g. 200. Overrides the task's standard rate. WorkflowMax only applies it when the org's task invoice rate is set to Task (not Staff)."),
     },
     async (params, extra) => {
       try {
@@ -1077,6 +1245,8 @@ export function registerTools(server: McpServer) {
         if (params.estimated_minutes !== undefined) data.estimatedMinutes = params.estimated_minutes;
         if (params.staff !== undefined) data.staff = params.staff;
         if (params.label !== undefined) data.label = params.label;
+        if (params.billable !== undefined) data.billable = params.billable;
+        if (params.custom_billable_rate !== undefined) data.customBillableRate = params.custom_billable_rate;
         const result = await api.createJobTask(token, params.job_id, data);
         return toolResult(result);
       } catch (error) {
@@ -1097,15 +1267,21 @@ export function registerTools(server: McpServer) {
       })).optional().describe("Staff members to assign to this task"),
       label: z.string().optional().describe("Label for the task assignment"),
       status: z.string().optional().describe("Task status"),
+      billable: z.boolean().optional().describe("Whether the task is billable"),
+      custom_billable_rate: z.number().positive().optional().describe("Hourly billable rate for this task on this job only, e.g. 200. Only applies when the org's task invoice rate is set to Task."),
+      remove_custom_billable_rate: z.boolean().optional().describe("Set true to remove the custom rate so the task goes back to its standard rate"),
     },
     async (params, extra) => {
       try {
         const token = getAccessToken(extra);
-        const data: Partial<api.WfmJobTask> = {};
+        const data: api.UpdateJobTaskRequest = {};
         if (params.estimated_minutes !== undefined) data.estimatedMinutes = params.estimated_minutes;
         if (params.staff !== undefined) data.staff = params.staff;
         if (params.label !== undefined) data.label = params.label;
         if (params.status !== undefined) data.status = params.status;
+        if (params.billable !== undefined) data.billable = params.billable;
+        if (params.custom_billable_rate !== undefined) data.customBillableRate = params.custom_billable_rate;
+        if (params.remove_custom_billable_rate) data.customBillableRate = null;
         const result = await api.updateJobTask(token, params.task_id, data);
         return toolResult(result);
       } catch (error) {
