@@ -58,6 +58,17 @@ Every allow and deny is logged in Railway as `[Xero][access] ALLOW|DENY <email> 
 
 **Claude-side controls (extra layer).** On Team and Enterprise plans only Owners can add custom connectors, and Owners can switch specific tools off for the whole org in Organization settings → Connectors. Enterprise can also limit a connector to certain groups of people. Those apply to everyone at once. The per-person split lives in the `ACCESS_*` lists above.
 
+## Running it for another organisation
+
+Run the same code as a second Railway service (e.g. `xero-diskbank`), with the same Dockerfile and no code changes. Each service is locked to one organisation and its own people:
+
+- `XERO_TENANT_ID` is the other organisation. That service can never call any other org.
+- `ALLOWED_EMAIL_DOMAINS` is their domain (e.g. `diskbank.com.au`). Add `distl.com.au` only if Distl people need in too.
+- Its own `ACCESS_*` lists.
+- Add it in Claude as its own connector, with its own `/mcp` URL.
+
+**Reusing the same Xero app is fine.** Use the same `CLIENT_ID` and `CLIENT_SECRET`, and add the new service's `<SERVER_URL>/oauth/callback` as an extra redirect URI in the Xero app. The app only identifies the connector to Xero. It doesn't grant access to anything. Because the services share the app, a sign-in from one service is technically accepted by the other. That changes nothing in practice: every call is checked against the receiving service's own domain, org and `ACCESS_*` lists. A Distl person who points their token at the Diskbank service gets refused unless that service lists them, and vice versa. Xero's consent screen shows the app's name to both companies, so name it something neutral if that matters.
+
 ## Tools
 
 ### Organisation
