@@ -150,6 +150,41 @@ export interface WfmContact {
   isPrimary?: boolean;
 }
 
+export interface ContactClientLink {
+  uuid: string;
+  position?: string;
+  primaryContact?: boolean;
+  includeInEmails?: boolean;
+}
+
+// POST /v2/clients/contacts. WorkflowMax wants firstName/lastName (not a
+// single name) and links the contact to clients through the `clients` array.
+// Position and primary-contact live on that link, not on the contact.
+export interface CreateContactRequest {
+  firstName: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  mobile?: string;
+  clients?: ContactClientLink[];
+}
+
+// PUT /v2/clients/contacts/{uuid}
+export interface UpdateContactRequest {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  mobile?: string;
+}
+
+// PUT /v2/clients/{clientUUID}/contacts/{contactUUID}
+export interface UpdateContactClientLinkRequest {
+  position?: string;
+  primaryContact?: boolean;
+  includeInEmails?: boolean;
+}
+
 export interface WfmJob {
   id: string;
   name: string;
@@ -184,6 +219,12 @@ export interface WfmJobStatus {
   name: string;
 }
 
+export interface WfmJobCategory {
+  uuid?: string;
+  id?: string;
+  name: string;
+}
+
 export interface CreateJobRequest {
   jobname: string;
   clientuuid: string;
@@ -191,7 +232,9 @@ export interface CreateJobRequest {
   startDate?: string;
   dueDate?: string;
   budget?: number;
-  categoryuuid?: string;
+  // WorkflowMax field is `jobCategoryUUID`. `categoryuuid` is not a field and
+  // was silently ignored, so jobs were created with no category.
+  jobCategoryUUID?: string;
   templateuuid?: string;
   priority?: string;
   statusuuid?: string;
@@ -204,7 +247,7 @@ export interface UpdateJobRequest {
   dueDate?: string;
   budget?: number;
   status?: string;
-  categoryuuid?: string;
+  jobCategoryUUID?: string;
   priority?: string;
   jobmanageruuid?: string;
   clientmanageruuid?: string;
@@ -216,6 +259,20 @@ export interface CreateJobTaskRequest {
   estimatedMinutes?: number;
   staff?: WfmJobTaskStaff[];
   label?: string;
+  billable?: boolean;
+  // Overrides the task's billable rate on this job only. WorkflowMax only
+  // applies it when the job's task invoice rate mode is Task.
+  customBillableRate?: number;
+}
+
+export interface UpdateJobTaskRequest {
+  estimatedMinutes?: number;
+  staff?: WfmJobTaskStaff[];
+  label?: string;
+  status?: string;
+  billable?: boolean;
+  // null removes the custom rate.
+  customBillableRate?: number | null;
 }
 
 export interface WfmTimesheet {
@@ -276,6 +333,44 @@ export interface WfmQuote {
   validDate?: string;
   amount?: number;
   description?: string;
+}
+
+export interface CreateQuoteRequest {
+  clientUUID: string;
+  quoteName: string;
+  contactUUID?: string;
+  type?: string;
+  jobTemplateUUID?: string;
+  salePersonUUID?: string;
+  description?: string;
+  budget?: number;
+  validFrom?: string;
+  validTo?: string;
+  status?: string;
+  fixedPrice?: boolean;
+}
+
+export interface CreateQuoteTaskRequest {
+  taskUUID: string;
+  estimatedMinutes?: number;
+  label?: string;
+  description?: string;
+  billable?: boolean;
+  optional?: boolean;
+  billableRate?: number;
+  fixedPriceAmount?: number;
+}
+
+export interface CreateQuoteCostRequest {
+  costName?: string;
+  costUUID?: string;
+  quantity: number;
+  unitCost?: number;
+  unitPrice?: number;
+  billable?: boolean;
+  optional?: boolean;
+  note?: string;
+  fixedPriceAmount?: number;
 }
 
 export interface WfmLead {
@@ -448,7 +543,7 @@ export async function getContact(
 
 export async function createContact(
   accessToken: string,
-  data: Partial<WfmContact>
+  data: CreateContactRequest
 ): Promise<WfmContact> {
   return wfmRequest<WfmContact>(`${BASE_URL}/clients/contacts`, {
     method: "POST",
@@ -460,9 +555,23 @@ export async function createContact(
 export async function updateContact(
   accessToken: string,
   contactId: string,
-  data: Partial<WfmContact>
+  data: UpdateContactRequest
 ): Promise<WfmContact> {
   return wfmRequest<WfmContact>(`${BASE_URL}/clients/contacts/${contactId}`, {
+    method: "PUT",
+    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+/** Update a contact's position / primary flag for one client. */
+export async function updateContactClientLink(
+  accessToken: string,
+  clientId: string,
+  contactId: string,
+  data: UpdateContactClientLinkRequest
+): Promise<unknown> {
+  return wfmRequest(`${BASE_URL}/clients/${clientId}/contacts/${contactId}`, {
     method: "PUT",
     headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -502,6 +611,15 @@ export async function listJobStatuses(
     { headers: authHeaders(accessToken) }
   );
   return Array.isArray(resp) ? resp : (resp.data ?? []);
+}
+
+export async function listJobCategories(
+  accessToken: string
+): Promise<PaginatedResponse<WfmJobCategory>> {
+  return wfmRequest<PaginatedResponse<WfmJobCategory>>(
+    `${BASE_URL}/job-categories${qs({ status: "active", pageSize: 100 })}`,
+    { headers: authHeaders(accessToken) }
+  );
 }
 
 export async function createJob(
@@ -617,7 +735,7 @@ export async function getInvoice(
 }
 
 // ---------------------------------------------------------------------------
-// Quotes (read-only)
+// Quotes
 // ---------------------------------------------------------------------------
 
 export async function listQuotes(
@@ -636,6 +754,43 @@ export async function getQuote(
 ): Promise<WfmQuote> {
   return wfmRequest<WfmQuote>(`${BASE_URL}/quotes/${quoteId}`, {
     headers: authHeaders(accessToken),
+  });
+}
+
+export async function createQuote(
+  accessToken: string,
+  data: CreateQuoteRequest
+): Promise<WfmQuote> {
+  return wfmRequest<WfmQuote>(`${BASE_URL}/quotes`, {
+    method: "POST",
+    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+/** Add a task line to a draft quote. */
+export async function createQuoteTask(
+  accessToken: string,
+  quoteId: string,
+  data: CreateQuoteTaskRequest
+): Promise<unknown> {
+  return wfmRequest(`${BASE_URL}/quotes/${quoteId}/tasks`, {
+    method: "POST",
+    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+/** Add a cost line to a draft quote. */
+export async function createQuoteCost(
+  accessToken: string,
+  quoteId: string,
+  data: CreateQuoteCostRequest
+): Promise<unknown> {
+  return wfmRequest(`${BASE_URL}/quotes/${quoteId}/costs`, {
+    method: "POST",
+    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    body: JSON.stringify(data),
   });
 }
 
@@ -827,7 +982,7 @@ export async function createJobTask(
 export async function updateJobTask(
   accessToken: string,
   taskId: string,
-  data: Partial<WfmJobTask>
+  data: UpdateJobTaskRequest
 ): Promise<WfmJobTask> {
   return wfmRequest<WfmJobTask>(`${BASE_URL}/jobs/tasks/${taskId}`, {
     method: "PUT",
