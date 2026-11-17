@@ -3,6 +3,7 @@ import { z } from "zod";
 import { ConnectorError } from "@custom-connectors/shared";
 import * as api from "./api.js";
 import { authorise, describeAccess, groupForPath } from "./access.js";
+import { attachmentToContent } from "./attachment-content.js";
 
 function toolResult(data: unknown) {
   return {
@@ -481,12 +482,65 @@ export function registerTools(server: McpServer) {
   );
 
   // =========================================================================
+  // ACCOUNTING: ATTACHMENTS
+  // =========================================================================
+
+  server.tool(
+    "get_attachment",
+    "Read a file attached to a Xero record (a bill, invoice, receipt, bank transaction, contact and so on). PDFs come back as their text, page by page; images are shown as images; text and CSV files come back as text. Scanned PDFs with no text layer, and other file types like Excel or Word, can't be read yet. Pass the record type and its ID. If the record has more than one attachment and you don't name one, this lists them so you can pick. For long PDFs, use page_from and page_to.",
+    {
+      record_type: z.enum(api.ATTACHMENT_ENDPOINTS).describe("What the attachment is on, e.g. Invoices for bills and sales invoices"),
+      record_id: xeroId.describe("The record's ID, e.g. the InvoiceID"),
+      attachment_id: xeroId.optional().describe("Which attachment, if the record has more than one"),
+      file_name: z.string().optional().describe("Or pick the attachment by its file name"),
+      page_from: z.number().int().min(1).optional().describe("PDFs only: first page to read"),
+      page_to: z.number().int().min(1).optional().describe("PDFs only: last page to read"),
+    },
+    async (params, extra) => {
+      try {
+        const token = await authorise(extra, "get_attachment");
+        const attachments = await api.listAttachments(token, params.record_type, params.record_id);
+        if (!attachments.length) {
+          throw new ConnectorError("That record has no attachments.", "NO_ATTACHMENTS", 404);
+        }
+
+        let chosen = attachments;
+        if (params.attachment_id) {
+          chosen = attachments.filter((a) => a.AttachmentID === params.attachment_id);
+        } else if (params.file_name) {
+          const wanted = params.file_name.toLowerCase();
+          chosen = attachments.filter((a) => a.FileName.toLowerCase() === wanted);
+        }
+        if (!chosen.length) {
+          return toolResult({ note: "No attachment matched. These are on the record:", attachments });
+        }
+        if (chosen.length > 1) {
+          return toolResult({
+            note: "This record has more than one attachment. Call again with attachment_id to read one.",
+            attachments,
+          });
+        }
+
+        const bytes = await api.downloadAttachment(token, params.record_type, params.record_id, chosen[0]);
+        return {
+          content: await attachmentToContent(chosen[0], bytes, {
+            from: params.page_from,
+            to: params.page_to,
+          }),
+        };
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  // =========================================================================
   // ANY OTHER READ
   // =========================================================================
 
   server.tool(
     "xero_api_get",
-    "Read any other Xero Accounting or Payroll AU endpoint when no other tool covers it (read-only GET). Accounting examples: /Payments, /CreditNotes, /PurchaseOrders, /Quotes, /ManualJournals, /Budgets, /TrackingCategories, /TaxRates, /Items, /BankTransfers, /Invoices/{id}/Attachments, /Reports (published reports such as BAS). Payroll examples: /PayrollCalendars, /Settings, /SuperFunds, /PayItems. Pass filters in query, e.g. {\"where\": \"Status==\\\"AUTHORISED\\\"\", \"page\": \"1\"}. Dates come back as YYYY-MM-DD.",
+    "Read any other Xero Accounting or Payroll AU endpoint when no other tool covers it (read-only GET). Accounting examples: /Payments, /CreditNotes, /PurchaseOrders, /Quotes, /ManualJournals, /Budgets, /TrackingCategories, /TaxRates, /Items, /BankTransfers, /Invoices/{id}/Attachments (lists them; use get_attachment to read a file), /Reports (published reports such as BAS). Payroll examples: /PayrollCalendars, /Settings, /SuperFunds, /PayItems. Pass filters in query, e.g. {\"where\": \"Status==\\\"AUTHORISED\\\"\", \"page\": \"1\"}. Dates come back as YYYY-MM-DD.",
     {
       api: z.enum(["accounting", "payroll"]).describe("accounting = api.xro/2.0, payroll = payroll.xro/1.0 (AU)"),
       path: z.string().describe("Endpoint path starting with /, e.g. /Payments"),

@@ -62,16 +62,18 @@ function errorMessage(status: number, body: string): string {
 }
 
 /**
- * GET a Xero endpoint, logging the full error body on failure. Retries once
- * or twice on the per-minute and concurrent rate limits; the daily limit
- * (1,000 calls on the free Starter tier) is reported straight away.
+ * GET a Xero endpoint and return the raw response, logging the full error body
+ * on failure. Retries once or twice on the per-minute and concurrent rate
+ * limits; the daily limit (1,000 calls on the free Starter tier) is reported
+ * straight away.
  */
-export async function xeroGet<T = Record<string, unknown>>(
+async function xeroFetch(
   accessToken: string,
   api: XeroApi,
   path: string,
-  query: Query = {}
-): Promise<T> {
+  query: Query = {},
+  accept = "application/json"
+): Promise<Response> {
   const tenantId = await getTenantId(accessToken);
   const url = `${BASE_URLS[api]}${path}${qs(query)}`;
 
@@ -81,10 +83,10 @@ export async function xeroGet<T = Record<string, unknown>>(
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Xero-Tenant-Id": tenantId,
-        Accept: "application/json",
+        Accept: accept,
       },
     });
-    if (response.ok) return (await response.json()) as T;
+    if (response.ok) return response;
 
     const body = await response.text();
     console.error(`[Xero] API error ${response.status} on GET ${url}: ${body}`);
@@ -111,6 +113,17 @@ export async function xeroGet<T = Record<string, unknown>>(
       response.status
     );
   }
+}
+
+/** GET a Xero endpoint and parse the JSON body. */
+export async function xeroGet<T = Record<string, unknown>>(
+  accessToken: string,
+  api: XeroApi,
+  path: string,
+  query: Query = {}
+): Promise<T> {
+  const response = await xeroFetch(accessToken, api, path, query);
+  return (await response.json()) as T;
 }
 
 /**
@@ -1091,5 +1104,91 @@ export async function rawGet(
       400
     );
   }
+  if (/\/attachments\/[^/]+/i.test(path)) {
+    throw new ConnectorError(
+      "That's an attachment file, which isn't JSON. Use the get_attachment tool to download it.",
+      "USE_GET_ATTACHMENT",
+      400
+    );
+  }
   return tidy(await xeroGet(accessToken, api, path, query), api === "payroll");
+}
+
+// ---------------------------------------------------------------------------
+// Attachments
+// ---------------------------------------------------------------------------
+
+/** Accounting record types that can have attachments. */
+export const ATTACHMENT_ENDPOINTS = [
+  "Invoices",
+  "Receipts",
+  "CreditNotes",
+  "RepeatingInvoices",
+  "BankTransactions",
+  "BankTransfers",
+  "Contacts",
+  "Accounts",
+  "ManualJournals",
+  "PurchaseOrders",
+  "Quotes",
+] as const;
+export type AttachmentEndpoint = (typeof ATTACHMENT_ENDPOINTS)[number];
+
+export interface AttachmentInfo {
+  AttachmentID: string;
+  FileName: string;
+  MimeType: string;
+  ContentLength?: number;
+}
+
+/** Largest file the connector will download. */
+export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+
+export async function listAttachments(
+  accessToken: string,
+  endpoint: AttachmentEndpoint,
+  recordId: string
+): Promise<AttachmentInfo[]> {
+  const data = await xeroGet(accessToken, "accounting", `/${endpoint}/${recordId}/Attachments`);
+  return ((data.Attachments as AttachmentInfo[] | undefined) ?? []).map((a) => ({
+    AttachmentID: a.AttachmentID,
+    FileName: a.FileName,
+    MimeType: a.MimeType,
+    ContentLength: a.ContentLength,
+  }));
+}
+
+/**
+ * Download one attachment's file. Xero returns the raw file when the Accept
+ * header is the attachment's own mime type.
+ */
+export async function downloadAttachment(
+  accessToken: string,
+  endpoint: AttachmentEndpoint,
+  recordId: string,
+  attachment: AttachmentInfo
+): Promise<Buffer> {
+  if ((attachment.ContentLength ?? 0) > MAX_ATTACHMENT_BYTES) {
+    throw new ConnectorError(
+      `${attachment.FileName} is ${Math.round((attachment.ContentLength ?? 0) / 1048576)} MB, over the ${MAX_ATTACHMENT_BYTES / 1048576} MB limit. Open it in Xero instead.`,
+      "ATTACHMENT_TOO_LARGE",
+      413
+    );
+  }
+  const response = await xeroFetch(
+    accessToken,
+    "accounting",
+    `/${endpoint}/${recordId}/Attachments/${attachment.AttachmentID}`,
+    {},
+    attachment.MimeType || "application/octet-stream"
+  );
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > MAX_ATTACHMENT_BYTES) {
+    throw new ConnectorError(
+      `${attachment.FileName} is over the ${MAX_ATTACHMENT_BYTES / 1048576} MB limit. Open it in Xero instead.`,
+      "ATTACHMENT_TOO_LARGE",
+      413
+    );
+  }
+  return bytes;
 }
