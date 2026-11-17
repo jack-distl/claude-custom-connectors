@@ -40,7 +40,7 @@ Every tool call runs these checks before anything goes to Xero (`src/access.ts`)
 | Group | Env var | Tools |
 |-------|---------|-------|
 | (everyone who passes 1 to 3) | | `my_access`, `get_organisation` |
-| accounting | `ACCESS_ACCOUNTING` | `list_accounts`, `list_contacts`, `list_invoices`, `get_invoice`, `list_bank_transactions`, `list_repeating_invoices`, `software_spend_summary`, `xero_api_get` on accounting paths |
+| accounting | `ACCESS_ACCOUNTING` | `get_attachment`, `list_accounts`, `list_contacts`, `list_invoices`, `get_invoice`, `list_bank_transactions`, `list_repeating_invoices`, `software_spend_summary`, `xero_api_get` on accounting paths |
 | reports | `ACCESS_REPORTS` | `get_report`, `xero_api_get` on any `/Reports` path |
 | leave | `ACCESS_LEAVE` | `list_employees`, `list_leave_types`, `list_leave_applications`, `get_leave_by_day` |
 | payroll | `ACCESS_PAYROLL` | `get_employee`, `list_payroll_timesheets`, `list_pay_runs`, `get_pay_run`, `get_payslip`, `xero_api_get` on any payroll path. Includes leave |
@@ -100,6 +100,7 @@ Run the same code as a second Railway service (e.g. `xero-diskbank`), with the s
 | `list_bank_transactions` | Spend/receive money (card payments, direct debits) with line items |
 | `list_repeating_invoices` | Repeating bill and invoice templates with schedules |
 | `software_spend_summary` | Software/subscription spend grouped by supplier (see below) |
+| `get_attachment` | Read a file attached to a bill, invoice, receipt, bank transaction, contact etc. PDFs come back as text page by page, images as images, text and CSV as text. Scanned PDFs and Excel/Word files can't be read yet. 20 MB limit |
 | `get_report` | P&L, balance sheet, trial balance, bank summary, executive summary, aged payables/receivables |
 | `xero_api_get` | Any other Accounting or Payroll AU GET endpoint (read-only) |
 

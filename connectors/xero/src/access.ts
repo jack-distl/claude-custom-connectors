@@ -42,6 +42,7 @@ const TOOL_GROUPS: Record<string, ToolGroup | "by_path"> = {
   list_bank_transactions: "accounting",
   list_repeating_invoices: "accounting",
   software_spend_summary: "accounting",
+  get_attachment: "accounting",
   get_report: "reports",
   xero_api_get: "by_path",
 };
