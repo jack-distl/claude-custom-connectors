@@ -3,6 +3,7 @@ import {
   startServer,
 } from "@custom-connectors/shared";
 import { registerTools } from "./tools.js";
+import { logPolicy, signInAllowlist } from "./access.js";
 
 /**
  * Read-only access to accounting and AU payroll. Apps created after
@@ -52,15 +53,15 @@ const config = {
     // Send Xero back through our /oauth/callback so the `iss` Claude sees is
     // always ours. Register <SERVER_URL>/oauth/callback in the Xero app.
     proxyCallback: true,
-    // Only these people can sign in. Unset or empty locks everyone out.
-    allowedEmails: (process.env.ALLOWED_EMAILS ?? "").split(",").filter((e) => e.trim()),
+    // Sign-in lock: emails on ALLOWED_EMAILS or at a domain in
+    // ALLOWED_EMAIL_DOMAINS. Both empty locks everyone out. The same check
+    // runs again on every tool call in access.ts, with the per-area lists.
+    ...signInAllowlist,
     userinfoUrl: "https://identity.xero.com/connect/userinfo",
   },
 };
 
-if (!config.oauth.allowedEmails.length) {
-  console.warn("[Xero] ALLOWED_EMAILS is not set, so nobody can sign in. Set it in Railway.");
-}
+logPolicy();
 
 const server = createConnectorServer(config);
 registerTools(server);
